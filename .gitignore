@@ -1,0 +1,8 @@
+# Default ignored files
+/workspace.xml
+
+# Ignore everything from CLion
+/cmake-build-*/
+/*.o
+/.idea/
+
