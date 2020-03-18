@@ -46,10 +46,10 @@ private:
 
     std::string input_file;
 
-    int N;
-    int m;
-    int M;
-    double L;
+    int N;      // number of finite difference nodes (degrees of freedom)   [-]
+    int M;      // number of variables per node (dimensionality)            [-]
+    int m;      // number of non-species variables per node (M - nSpecies)  [-]
+    double L;   // inlet-to-wall distance                                   [m]
 
     VectorXd nodes;
     VectorXd dx;
@@ -64,6 +64,7 @@ private:
     Transport* trans;
 
     double Tgas_0;
+    std::string X_0;
 
     double T_in;
     double T_wall;

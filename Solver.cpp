@@ -7,8 +7,6 @@
 #include "Solver.h"
 #include "toml.hpp"
 
-
-
 Solver::Solver() {
     std::cout << "Solver::Solver()" << std::endl;
 }
@@ -51,7 +49,7 @@ void Solver::ReadParams(int argc, char* argv[]){
         dt = toml::find(mesh_,"Time","dt").as_floating();
 
     // Physics
-    M = toml::find(data,"Physics","M").as_integer();
+    m = toml::find(data,"Physics","m").as_integer();
 
     // Gas
     mech_file = toml::find(data,"Gas","mech_file").as_string();
@@ -72,6 +70,7 @@ void Solver::ReadParams(int argc, char* argv[]){
 
     // ICs
     Tgas_0 = toml::find(data,"ICs","Tgas_0").as_floating();
+    X_0 = toml::find(data,"ICs","X_0").as_string();
 }
 
 void Solver::SetupGas() {
@@ -83,10 +82,13 @@ void Solver::SetupGas() {
     kin = newKineticsMgr(gas->xml(),phases_);
     trans = newDefaultTransportMgr(gas);
 
-    if (verbose)
-        gas->setState_TPX(300.0, 101325.0, "O2:1.0,N2:3.76");
-        std::cout << "  SetupGas() at T = " << gas->temperature() << " and p = " << gas->pressure() << " gives viscosity = " << trans->viscosity() << std::endl;
+    M = m + gas->nSpecies();
 
+    if (verbose) {
+        gas->setState_TPX(Tgas_0, p_sys, X_0);
+        std::cout << "  SetupGas() at T = " << gas->temperature() << " and p = " << gas->pressure()
+                  << " gives viscosity = " << trans->viscosity() << " for X = " << X_0 << std::endl;
+    }
 }
 
 void Solver::ConstructMesh() {
@@ -179,7 +181,10 @@ void Solver::SetIC() {
     // resize matrix
     phi = MatrixXd::Zero(N,M);
 
-    // basic IC; should get from input file
+    // set state to get mass fractions defined by initial (uniform) mole fractions in input file
+    gas->setState_TPX(Tgas_0, p_sys, X_0);
+
+    // loop over all variables
     for (int k = 0; k < M; k++){
         switch (k){
             // V
@@ -190,9 +195,9 @@ void Solver::SetIC() {
             case 1:
                 phi.col(k) = Tgas_0*VectorXd::Constant(N,1.0);
                 break;
-            // TODO this is a good place for an assert and error out if the case has not been implemented
+            // TODO add Z_l, m_d as cases here
             default:
-                phi.col(k) = VectorXd::Zero(N);
+                phi.col(k) = gas->massFraction(k-m)*VectorXd::Constant(N,1.0);
         }
     }
 
