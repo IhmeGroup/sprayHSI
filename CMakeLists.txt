@@ -11,8 +11,9 @@ set(CANTERA_ROOT ${UTILITIES_ROOT}/Cantera_CharlesX)
 set(SUNDIALS_ROOT ${UTILITIES_ROOT}/sundials-2.7.0/build)
 set(EIGEN3_ROOT /usr/local/Cellar/eigen/3.3.7)
 set(BOOST_ROOT /usr/local/Cellar/boost@1.55/1.55.0_1)
+set(TOML_ROOT /Users/danmohad/Utilities/toml11)
 
-include_directories(${CANTERA_ROOT}/include ${SUNDIALS_ROOT}/include ${EIGEN3_ROOT}/include/eigen3 ${BOOST_ROOT}/include)
+include_directories(${CANTERA_ROOT}/include ${SUNDIALS_ROOT}/include ${EIGEN3_ROOT}/include/eigen3 ${BOOST_ROOT}/include ${TOML_ROOT})
 link_directories(${CANTERA_ROOT}/lib ${SUNDIALS_ROOT}/lib)
 
 add_executable(Hiemenz_solver main.cpp Solver.cpp Solver.h BoundaryConditions/BCGeneric.cpp BoundaryConditions/BCGeneric.h BoundaryConditions/Inlet.cpp BoundaryConditions/Inlet.h)

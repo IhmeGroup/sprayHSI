@@ -5,6 +5,7 @@
 #include <iostream>
 #include <iomanip>
 #include "Solver.h"
+#include "toml.hpp"
 
 
 
@@ -28,32 +29,49 @@ void Solver::ReadParams(int argc, char* argv[]){
         throw(0);
     }
 
-    //TODO read from an input file
-
     // parse input file
+    const toml::value data = toml::parse(input_file);
 
     // set this-> private members
-    verbose = false;
 
-    N = 21;
-    L = 0.1;
-    time_max = 100.0;
-    iteration_max = 10000;
-    output_interval = 1000;
-    dt = 0.01;
+    // IO
+    verbose = toml::find(data,"IO","verbose").as_boolean();
+    output_interval = toml::find(data,"IO","output_interval").as_integer();
 
-    M = 2;
+    // Mesh
+    const auto mesh_ = toml::find(data,"Mesh");
 
-    mech_file = "air.xml";
-    mech_type = "";
+        // Space
+        N = toml::find(mesh_,"Space","N").as_integer();
+        L = toml::find(mesh_,"Space","L").as_floating();
 
-    Tgas_0 = 300.0;
-    T_in = 300.0;
-    T_wall = 800.0;
-    p_sys = 101325.0;
+        // Time
+        time_max = toml::find(mesh_,"Time","time_max").as_floating();
+        iteration_max = toml::find(mesh_,"Time","iteration_max").as_integer();
+        dt = toml::find(mesh_,"Time","dt").as_floating();
 
-    mdot = 0.01;
+    // Physics
+    M = toml::find(data,"Physics","M").as_integer();
 
+    // Gas
+    mech_file = toml::find(data,"Gas","mech_file").as_string();
+    mech_type = toml::find(data,"Gas","mech_type").as_string();
+
+    // BCs
+    const auto BCs_ = toml::find(data,"BCs");
+
+        // Inlet
+        T_in = toml::find(BCs_,"Inlet","T_in").as_floating();
+        mdot = toml::find(BCs_,"Inlet","mdot").as_floating();
+
+        // Wall
+        T_wall = toml::find(BCs_,"Wall","T_wall").as_floating();
+
+        // System
+        p_sys = toml::find(BCs_,"System","p_sys").as_floating();
+
+    // ICs
+    Tgas_0 = toml::find(data,"ICs","Tgas_0").as_floating();
 }
 
 void Solver::SetupGas() {
