@@ -50,11 +50,11 @@ void Solver::ReadParams(int argc, char* argv[]){
 
     // Physics
     m = toml::find(data,"Physics","m").as_integer();
-    reacting = toml::find(data,"Physics","reacting").as_boolean();
 
     // Gas
     mech_file = toml::find(data,"Gas","mech_file").as_string();
     mech_type = toml::find(data,"Gas","mech_type").as_string();
+    reacting = toml::find(data,"Gas","reacting").as_boolean();
 
     // BCs
     const auto BCs_ = toml::find(data,"BCs");
