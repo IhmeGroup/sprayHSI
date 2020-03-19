@@ -62,6 +62,8 @@ private:
     std::string mech_type;
     ThermoPhase* gas;
     Kinetics* kin;
+    VectorXd omega_dot_mol;
+    VectorXd species_enthalpies_mol;
     Transport* trans;
     VectorXd mix_diff_coeffs;
 

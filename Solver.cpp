@@ -89,7 +89,6 @@ void Solver::ReadParams(int argc, char* argv[]){
 void Solver::SetupGas() {
     std::cout << "Solver::SetupGas()" << std::endl;
 
-    //TODO add trans and kin objects for transport and kinetics
     gas = newPhase(mech_file,mech_type);
     std::vector<ThermoPhase*> phases_ {gas};
     kin = newKineticsMgr(gas->xml(),phases_);
@@ -116,9 +115,17 @@ void Solver::DerivedParams() {
     gas->setState_TPX(T_in,p_sys,X_in);
     Y_in = md_;
 
-    // Mixture diffusion coefficients
+    // Mixture diffusion coefficients (mass-based by default)
     mix_diff_coeffs.resize(gas->nSpecies());
     trans->getMixDiffCoeffs(mix_diff_coeffs.data());
+
+    // Molar production rates
+    omega_dot_mol.resize(gas->nSpecies());
+    kin->getNetProductionRates(omega_dot_mol.data());
+
+    // Species molar enthalpies
+    species_enthalpies_mol.resize((gas->nSpecies()));
+    gas->getPartialMolarEnthalpies(species_enthalpies_mol.data());
 }
 
 void Solver::ConstructMesh() {
@@ -362,7 +369,6 @@ double Solver::Getc(int k) {
 }
 
 double Solver::Getmu(int k) {
-    //TODO change this function when species equation is added in
     double mu;
     switch (k){
         // V
@@ -384,22 +390,22 @@ double Solver::Getmu(int k) {
 }
 
 double Solver::Getomegadot(const Ref<const RowVectorXd>& phi, int k) {
-    //TODO change this function when species equation is added in
-    double omegadot;
+    double omegadot_;
     switch (k){
         // V
         case 0:
-            omegadot = rho_inf*pow(a,2) - gas->density()*pow(phi(0),2);
+            omegadot_ = rho_inf * pow(a, 2) - gas->density() * pow(phi(0), 2);
             break;
         // T
-        //TODO add temperature source term when species equation is added in
         case 1:
-            omegadot = 0.0;
+            omegadot_ = - species_enthalpies_mol.dot(omega_dot_mol);
             break;
+        // TODO add Z_l, m_d sources here
+        // Species
         default:
-            omegadot = 0.0;
+            omegadot_ = omega_dot_mol(k-m)*gas->molecularWeight(k-m);
     }
-    return omegadot;
+    return omegadot_;
 }
 
 MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
@@ -427,11 +433,11 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
      * conv = -u*ddx*phi
      * diff = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * phi))) (alternative)
      * diff = (diag(rho_inv)*c) .* (mu .* (d2dx2 * phi))
-     * src  = diag(rho_inv) * omegadot
+     * src  = (diag(rho_inv)*c) .* omegadot
      */
     MatrixXd conv = -1.0*u.asDiagonal() * (ddx * phi);
     MatrixXd diff = (rho_inv.asDiagonal() * c).array() * (mu.array() * (d2dx2 * phi).array());
-    MatrixXd src  = rho_inv.asDiagonal() * omegadot;
+    MatrixXd src  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
 
     return conv + diff + src;
 }
