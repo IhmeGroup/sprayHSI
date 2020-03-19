@@ -64,6 +64,7 @@ private:
     Kinetics* kin;
     VectorXd omega_dot_mol;
     VectorXd species_enthalpies_mol;
+    bool reacting;
     Transport* trans;
     VectorXd mix_diff_coeffs;
 

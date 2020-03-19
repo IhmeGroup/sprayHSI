@@ -50,6 +50,7 @@ void Solver::ReadParams(int argc, char* argv[]){
 
     // Physics
     m = toml::find(data,"Physics","m").as_integer();
+    reacting = toml::find(data,"Physics","reacting").as_boolean();
 
     // Gas
     mech_file = toml::find(data,"Gas","mech_file").as_string();
@@ -396,14 +397,20 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi, int k) {
         case 0:
             omegadot_ = rho_inf * pow(a, 2) - gas->density() * pow(phi(0), 2);
             break;
-        // T
+        // T: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar
         case 1:
-            omegadot_ = - species_enthalpies_mol.dot(omega_dot_mol);
+            if (reacting)
+                omegadot_ = - species_enthalpies_mol.dot(omega_dot_mol);
+            else
+                omegadot_ = 0.0;
             break;
         // TODO add Z_l, m_d sources here
-        // Species
+        // Species: omegadot_i^molar * molarmass_i
         default:
-            omegadot_ = omega_dot_mol(k-m)*gas->molecularWeight(k-m);
+            if (reacting)
+                omegadot_ = omega_dot_mol(k-m)*gas->molecularWeight(k-m);
+            else
+                omegadot_ = 0.0;
     }
     return omegadot_;
 }
@@ -449,6 +456,16 @@ int Solver::RunSolver() {
     try {
         while(!CheckStop()){
 
+            // Outputs
+            if (!(iteration % output_interval)){
+                Output();
+            }
+
+            if (verbose){
+                std::cout << "iteration = " << iteration << std::endl;
+                std::cout << "phi(t = " << time << ") = \n" << phi << std::endl;
+            }
+
             // Loop on BCs
             //inlet_bc.Update();
             //wall_bc.Update();
@@ -462,15 +479,7 @@ int Solver::RunSolver() {
             iteration++;
             time += dt;
 
-            // Outputs
-            if (!(iteration % output_interval)){
-                Output();
-            }
 
-            if (verbose){
-                std::cout << "iteration = " << iteration << std::endl;
-                std::cout << "phi(t = " << time << ") = \n" << phi << std::endl;
-            }
         }
 
         return 0;
