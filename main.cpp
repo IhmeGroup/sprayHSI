@@ -19,6 +19,9 @@ int main(int argc, char* argv[]) {
     // Setup gas object
     spray_solver.SetupGas();
 
+    // Compute derived parameters
+    spray_solver.DerivedParams();
+
     // Construct mesh
     spray_solver.ConstructMesh();
 

@@ -59,18 +59,31 @@ void Solver::ReadParams(int argc, char* argv[]){
     const auto BCs_ = toml::find(data,"BCs");
 
         // Inlet
-        T_in = toml::find(BCs_,"Inlet","T_in").as_floating();
-        mdot = toml::find(BCs_,"Inlet","mdot").as_floating();
+        std::string inlet_type = toml::find(BCs_,"Inlet","type").as_string();
+        if (inlet_type == "mdot") {
+            T_in = toml::find(BCs_, "Inlet", "T").as_floating();
+            X_in = toml::find(BCs_, "Inlet", "X").as_string();
+            mdot = toml::find(BCs_, "Inlet", "mdot").as_floating();
+        } else {
+            std::cerr << "Unknown Inlet BC type " << inlet_type << "not supported" << std::endl;
+        }
 
         // Wall
-        T_wall = toml::find(BCs_,"Wall","T_wall").as_floating();
+        wall_type = toml::find(BCs_,"Wall","type").as_string();
+        if (wall_type == "adiabatic"){
+            T_wall = -1.0;
+        } else if (wall_type == "isothermal"){
+            T_wall = toml::find(BCs_,"Wall","T").as_floating();
+        } else {
+            std::cerr << "Unknown Wall BC type " << wall_type << "not supported" << std::endl;
+        }
 
         // System
-        p_sys = toml::find(BCs_,"System","p_sys").as_floating();
+        p_sys = toml::find(BCs_,"System","p").as_floating();
 
     // ICs
-    Tgas_0 = toml::find(data,"ICs","Tgas_0").as_floating();
-    X_0 = toml::find(data,"ICs","X_0").as_string();
+    Tgas_0 = toml::find(data,"ICs","T").as_floating();
+    X_0 = toml::find(data,"ICs","X").as_string();
 }
 
 void Solver::SetupGas() {
@@ -89,6 +102,23 @@ void Solver::SetupGas() {
         std::cout << "  SetupGas() at T = " << gas->temperature() << " and p = " << gas->pressure()
                   << " gives viscosity = " << trans->viscosity() << " for X = " << X_0 << std::endl;
     }
+}
+
+void Solver::DerivedParams() {
+    // Map of pointer to mass fractions array
+    Map<const VectorXd> md_(gas->massFractions(), gas->nSpecies());
+
+    // Initial mass fractions
+    gas->setState_TPX(Tgas_0,p_sys,X_0);
+    Y_0 = md_;
+
+    // Inlet mass fractions
+    gas->setState_TPX(T_in,p_sys,X_in);
+    Y_in = md_;
+
+    // Mixture diffusion coefficients
+    mix_diff_coeffs.resize(gas->nSpecies());
+    trans->getMixDiffCoeffs(mix_diff_coeffs.data());
 }
 
 void Solver::ConstructMesh() {
@@ -181,9 +211,6 @@ void Solver::SetIC() {
     // resize matrix
     phi = MatrixXd::Zero(N,M);
 
-    // set state to get mass fractions defined by initial (uniform) mole fractions in input file
-    gas->setState_TPX(Tgas_0, p_sys, X_0);
-
     // loop over all variables
     for (int k = 0; k < M; k++){
         switch (k){
@@ -197,7 +224,7 @@ void Solver::SetIC() {
                 break;
             // TODO add Z_l, m_d as cases here
             default:
-                phi.col(k) = gas->massFraction(k-m)*VectorXd::Constant(N,1.0);
+                phi.col(k) = Y_0(k-m)*VectorXd::Constant(N,1.0);
         }
     }
 
@@ -240,11 +267,19 @@ void Solver::UpdateBCs() {
                 break;
             // T
             case 1:
-                phi(0,k) = T_wall;
+                if (wall_type == "isothermal")
+                    phi(0,k) = T_wall;
+                else if (wall_type == "adiabatic")
+                    // 1st order one-sided difference
+                    phi(0,k) = phi(1,k);
+                else
+                    std::cerr << "unknown wall type and this should be polymorphic anyway" << std::endl;
                 break;
-
+            // TODO update this for Z_l and m_d equations
+            // Species
             default:
-                phi(0,k) = 0.0;
+                // Species have no flux at wall for now... change when multiphase and filming
+                phi(0,k) = phi(1,k);
         }
     }
 
@@ -259,9 +294,10 @@ void Solver::UpdateBCs() {
             case 1:
                 phi(N-1,k) = T_in;
                 break;
-
+            // TODO update this for Z_l and m_d equations
+            // Species
             default:
-                phi(N-1,k) = 0.0;
+                phi(N-1,k) = Y_in(k-m);
         }
     }
 
@@ -308,8 +344,8 @@ VectorXd Solver::Getrho(const Ref<const MatrixXd>& phi){
 }
 
 void Solver::SetState(const Ref<const RowVectorXd>& phi){
-    //TODO change this function when species equation is added in
-    gas->setState_TP(phi(1),p_sys);
+    //TODO make sure it's safe to use the raw pointer like this
+    gas->setState_TPY(phi(1),p_sys,phi.tail(gas->nSpecies()).data());
 }
 
 double Solver::Getc(int k) {
@@ -339,8 +375,10 @@ double Solver::Getmu(int k) {
             mu = trans->thermalConductivity();
             //mu = 0.01;
             break;
+        // TODO make sure to set mu = 0 for Z_l and m_d
+        // Species
         default:
-            mu = 1.0;
+            mu = mix_diff_coeffs(k-m);
     }
     return mu;
 }

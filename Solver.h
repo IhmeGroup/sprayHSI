@@ -63,7 +63,6 @@ private:
     ThermoPhase* gas;
     Kinetics* kin;
     Transport* trans;
-    double* mix_diff_coeffs_ptr;
     VectorXd mix_diff_coeffs;
 
     // ICs
