@@ -23,6 +23,7 @@ public:
 
     void ReadParams(int argc, char* argv[]);
     void SetupGas();
+    void DerivedParams();
     void ConstructMesh();
     void ConstructOperators();
     void SetIC();
@@ -62,17 +63,30 @@ private:
     ThermoPhase* gas;
     Kinetics* kin;
     Transport* trans;
+    double* mix_diff_coeffs_ptr;
+    VectorXd mix_diff_coeffs;
 
+    // ICs
     double Tgas_0;
     std::string X_0;
+    VectorXd Y_0; // derived
 
-    double T_in;
-    double T_wall;
-    double p_sys;
-    double mdot;
-    double a;
+    // BCs
+        // Inlet
+        std::string inlet_type;
+        double T_in;
+        std::string X_in;
+        double mdot;
+        double rho_inf; // derived
+        VectorXd Y_in; // derived
 
-    double rho_inf;
+        // Wall
+        std::string wall_type;
+        double T_wall;
+
+        // System
+        double p_sys;
+        double a; // derived
 
     /*
      * Solution tensor \\phi, NxM
