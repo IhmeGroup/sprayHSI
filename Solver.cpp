@@ -57,34 +57,61 @@ void Solver::ReadParams(int argc, char* argv[]){
     reacting = toml::find(data,"Gas","reacting").as_boolean();
 
     // BCs
-    const auto BCs_ = toml::find(data,"BCs");
-
+    {
+        const auto BCs_ = toml::find(data, "BCs");
         // Inlet
-        std::string inlet_type = toml::find(BCs_,"Inlet","type").as_string();
-        if (inlet_type == "mdot") {
-            T_in = toml::find(BCs_, "Inlet", "T").as_floating();
-            X_in = toml::find(BCs_, "Inlet", "X").as_string();
-            mdot = toml::find(BCs_, "Inlet", "mdot").as_floating();
-        } else {
-            std::cerr << "Unknown Inlet BC type " << inlet_type << "not supported" << std::endl;
+        {
+            const auto Inlet_ = toml::find(BCs_, "Inlet");
+            // Gas
+            const auto Gas_ = toml::find(Inlet_, "Gas");
+            inlet_type = toml::find(Gas_, "type").as_string();
+            if (inlet_type == "mdot") {
+                T_in = toml::find(Gas_, "T").as_floating();
+                X_in = toml::find(Gas_, "X").as_string();
+                mdot = toml::find(Gas_, "mdot").as_floating();
+            } else {
+                std::cerr << "Unknown Inlet BC type " << inlet_type << "not supported" << std::endl;
+            }
+            // Spray
+            const auto Spray_ = toml::find(Inlet_, "Spray");
+            Z_l_in = toml::find(Spray_, "Z_l").as_floating();
+            m_d_in = toml::find(Spray_, "m_d").as_floating();
         }
 
         // Wall
-        wall_type = toml::find(BCs_,"Wall","type").as_string();
-        if (wall_type == "adiabatic"){
-            T_wall = -1.0;
-        } else if (wall_type == "isothermal"){
-            T_wall = toml::find(BCs_,"Wall","T").as_floating();
-        } else {
-            std::cerr << "Unknown Wall BC type " << wall_type << "not supported" << std::endl;
+        {
+            const auto Wall_ = toml::find(BCs_, "Wall");
+            // Gas
+            const auto Gas_ = toml::find(Wall_, "Gas");
+            wall_type = toml::find(Gas_, "type").as_string();
+            if (wall_type == "adiabatic") {
+                T_wall = -1.0;
+            } else if (wall_type == "isothermal") {
+                T_wall = toml::find(Gas_, "T").as_floating();
+            } else {
+                std::cerr << "Unknown Wall BC type " << wall_type << "not supported" << std::endl;
+            }
+            // Spray
+            const auto Spray_ = toml::find(Wall_, "Spray");
+            filming = toml::find(Spray_, "filming").as_boolean();
         }
 
         // System
-        p_sys = toml::find(BCs_,"System","p").as_floating();
+        p_sys = toml::find(BCs_, "System", "p").as_floating();
+    }
 
     // ICs
-    Tgas_0 = toml::find(data,"ICs","T").as_floating();
-    X_0 = toml::find(data,"ICs","X").as_string();
+    {
+        const auto ICs_ = toml::find(data, "ICs");
+        // Gas
+        const auto Gas_ = toml::find(ICs_,"Gas");
+            Tgas_0 = toml::find(Gas_, "T").as_floating();
+            X_0 = toml::find(Gas_, "X").as_string();
+        // Spray
+        const auto Spray_ = toml::find(ICs_,"Spray");
+            Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
+            m_d_0 = toml::find(Spray_, "m_d").as_floating();
+    }
 }
 
 void Solver::SetupGas() {
@@ -230,7 +257,15 @@ void Solver::SetIC() {
             case 1:
                 phi.col(k) = Tgas_0*VectorXd::Constant(N,1.0);
                 break;
-            // TODO add Z_l, m_d as cases here
+            // Z_l
+            case 2:
+                phi.col(k) = Z_l_0*VectorXd::Constant(N,1.0);
+                break;
+            // m_d
+            case 3:
+                // Set to very small number to ensure T and Z_l spray source terms don't become undefined
+                phi.col(k) = m_d_0*VectorXd::Constant(N,1.0);
+                break;
             default:
                 phi.col(k) = Y_0(k-m)*VectorXd::Constant(N,1.0);
         }
@@ -283,7 +318,13 @@ void Solver::UpdateBCs() {
                 else
                     std::cerr << "unknown wall type and this should be polymorphic anyway" << std::endl;
                 break;
-            // TODO update this for Z_l and m_d equations
+            // TODO ensure that this is mathematically correct for Z_l and m_d BCs
+            // Z_l
+            case 2:
+                break;
+            // m_d
+            case 3:
+                break;
             // Species
             default:
                 // Species have no flux at wall for now... change when multiphase and filming
@@ -302,7 +343,14 @@ void Solver::UpdateBCs() {
             case 1:
                 phi(N-1,k) = T_in;
                 break;
-            // TODO update this for Z_l and m_d equations
+            // Z_l
+            case 2:
+                phi(N-1,k) = Z_l_in;
+                break;
+            // m_d
+            case 3:
+                phi(N-1,k) = m_d_in;
+                break;
             // Species
             default:
                 phi(N-1,k) = Y_in(k-m);
@@ -382,7 +430,14 @@ double Solver::Getmu(int k) {
             mu = trans->thermalConductivity();
             //mu = 0.01;
             break;
-        // TODO make sure to set mu = 0 for Z_l and m_d
+        // Z_l
+        case 2:
+            mu = 0.0;
+            break;
+        // m_d
+        case 3:
+            mu = 0.0;
+            break;
         // Species
         default:
             mu = mix_diff_coeffs(k-m);
@@ -404,7 +459,14 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi, int k) {
             else
                 omegadot_ = 0.0;
             break;
-        // TODO add Z_l, m_d sources here
+        // Z_l
+        case 2:
+            omegadot_ = 0.0;
+            break;
+        // m_d
+        case 3:
+            omegadot_ = 0.0;
+            break;
         // Species: omegadot_i^molar * molarmass_i
         default:
             if (reacting)
@@ -423,30 +485,36 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
     MatrixXd c(MatrixXd::Zero(N,M));
     MatrixXd mu(MatrixXd::Zero(N,M));
     MatrixXd omegadot(MatrixXd::Zero(N,M));
+    VectorXd mdot_liq(VectorXd::Zero(N));
+    MatrixXd Gammadot(MatrixXd::Zero(N,M));
 
     for (int i = 1; i < N-1; i++){
         u(i) = Getu(phi, i);
         SetState(phi.row(i));
         rho_inv(i) = 1.0/gas->density();
+        // TODO implement mdot_liq, call here (for pure fuel)
         for (int k = 0; k < M; k++){
             c(i, k) = Getc(k);
             mu(i, k) = Getmu(k);
             omegadot(i, k) = Getomegadot(phi.row(i),k);
+            // TODO implement GetGammadot, call here
         }
     }
 
     /*
-     * RHS = conv + diff + src
-     * conv = -u*ddx*phi
-     * diff = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * phi))) (alternative)
-     * diff = (diag(rho_inv)*c) .* (mu .* (d2dx2 * phi))
-     * src  = (diag(rho_inv)*c) .* omegadot
+     * RHS          = conv + diff + src
+     * conv         = -u*ddx*phi
+     * diff         = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * phi))) (alternative)
+     * diff         = (diag(rho_inv)*c) .* (mu .* (d2dx2 * phi))
+     * src_gas      = (diag(rho_inv)*c) .* omegadot
+     * src_spray    = (diag(rho_inv)*c) .* (diag(mdot_liq) * Gammadot) (pure fuel)
      */
     MatrixXd conv = -1.0*u.asDiagonal() * (ddx * phi);
     MatrixXd diff = (rho_inv.asDiagonal() * c).array() * (mu.array() * (d2dx2 * phi).array());
-    MatrixXd src  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
+    MatrixXd src_gas  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
+    MatrixXd src_spray = (rho_inv.asDiagonal() * c).array() * (mdot_liq.asDiagonal() * Gammadot).array();
 
-    return conv + diff + src;
+    return conv + diff + src_gas + src_spray;
 }
 
 int Solver::RunSolver() {

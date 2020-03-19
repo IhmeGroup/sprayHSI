@@ -72,6 +72,8 @@ private:
     double Tgas_0;
     std::string X_0;
     VectorXd Y_0; // derived
+    double Z_l_0;
+    double m_d_0;
 
     // BCs
         // Inlet
@@ -79,12 +81,15 @@ private:
         double T_in;
         std::string X_in;
         double mdot;
+        double Z_l_in;
+        double m_d_in;
         double rho_inf; // derived
         VectorXd Y_in; // derived
 
         // Wall
         std::string wall_type;
         double T_wall;
+        bool filming;
 
         // System
         double p_sys;
