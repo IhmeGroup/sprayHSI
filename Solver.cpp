@@ -6,6 +6,7 @@
 #include <iomanip>
 #include "Solver.h"
 #include "toml.hpp"
+#include "CoolProp.h"
 
 Solver::Solver() {
     std::cout << "Solver::Solver()" << std::endl;
