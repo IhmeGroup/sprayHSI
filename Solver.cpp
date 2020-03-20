@@ -368,7 +368,14 @@ void Solver::UpdateBCs() {
 void Solver::StepIntegrator() {
     // TODO make polymorphic!!
     // Fwd Euler
+    // Get RHS
     MatrixXd RHS = GetRHS(time,phi);
+    // Don't update V, T, or Y_k (these have wall BCs, the spray advection eqns do not)
+    RHS.row(0).head(2) = RowVectorXd::Zero(2);
+    RHS.row(0).tail(gas->nSpecies()) = RowVectorXd::Zero(gas->nSpecies());
+    // Don't update anything at inlet (we impose BCs for all variables here)
+    RHS.row(RHS.rows()-1) = RowVectorXd::Zero(RHS.cols());
+
     phi = phi + dt*RHS;
 }
 
@@ -489,7 +496,7 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
     VectorXd mdot_liq(VectorXd::Zero(N));
     MatrixXd Gammadot(MatrixXd::Zero(N,M));
 
-    for (int i = 1; i < N-1; i++){
+    for (int i = 0; i < N; i++){
         u(i) = Getu(phi, i);
         SetState(phi.row(i));
         rho_inv(i) = 1.0/gas->density();
