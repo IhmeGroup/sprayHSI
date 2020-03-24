@@ -2,11 +2,13 @@
 // Created by Danyal Mohaddes on 2020-02-28.
 //
 
+#include <math.h>
 #include <iostream>
 #include <iomanip>
 #include "Solver.h"
 #include "toml.hpp"
 #include "CoolProp.h"
+#include "boost/algorithm/string.hpp"
 
 Solver::Solver() {
     std::cout << "Solver::Solver()" << std::endl;
@@ -34,28 +36,47 @@ void Solver::ReadParams(int argc, char* argv[]){
     // set this-> private members
 
     // IO
-    verbose = toml::find(data,"IO","verbose").as_boolean();
-    output_interval = toml::find(data,"IO","output_interval").as_integer();
+    {
+        const auto IO_ = toml::find(data, "IO");
+        verbose = toml::find(IO_, "verbose").as_boolean();
+        output_interval = toml::find(IO_, "output_interval").as_integer();
+    }
 
     // Mesh
-    const auto mesh_ = toml::find(data,"Mesh");
+    {
+        const auto Mesh_ = toml::find(data, "Mesh");
 
         // Space
-        N = toml::find(mesh_,"Space","N").as_integer();
-        L = toml::find(mesh_,"Space","L").as_floating();
+        N = toml::find(Mesh_, "Space", "N").as_integer();
+        L = toml::find(Mesh_, "Space", "L").as_floating();
 
         // Time
-        time_max = toml::find(mesh_,"Time","time_max").as_floating();
-        iteration_max = toml::find(mesh_,"Time","iteration_max").as_integer();
-        dt = toml::find(mesh_,"Time","dt").as_floating();
+        time_max = toml::find(Mesh_, "Time", "time_max").as_floating();
+        iteration_max = toml::find(Mesh_, "Time", "iteration_max").as_integer();
+        dt = toml::find(Mesh_, "Time", "dt").as_floating();
+    }
 
     // Physics
-    m = toml::find(data,"Physics","m").as_integer();
+    {
+        const auto Physics_ = toml::find(data, "Physics");
+        m = toml::find(Physics_, "m").as_integer();
+    }
 
     // Gas
-    mech_file = toml::find(data,"Gas","mech_file").as_string();
-    mech_type = toml::find(data,"Gas","mech_type").as_string();
-    reacting = toml::find(data,"Gas","reacting").as_boolean();
+    {
+        const auto Gas_ = toml::find(data, "Gas");
+        mech_file = toml::find(Gas_, "mech_file").as_string();
+        mech_type = toml::find(Gas_, "mech_type").as_string();
+        reacting = toml::find(Gas_, "reacting").as_boolean();
+    }
+
+    // Spray
+    {
+        const auto Spray_ = toml::find(data, "Spray");
+        evaporating = toml::find(Spray_,"evaporating").as_boolean();
+        if (evaporating)
+            X_liq = toml::find(Spray_, "species").as_string();
+    }
 
     // BCs
     {
@@ -155,6 +176,64 @@ void Solver::DerivedParams() {
     // Species molar enthalpies
     species_enthalpies_mol.resize((gas->nSpecies()));
     gas->getPartialMolarEnthalpies(species_enthalpies_mol.data());
+
+    // Spray parameters
+    // TODO change for multicomponent spray
+    // TODO assuming saturated liquid for now
+    if (evaporating) {
+        T_l = CoolProp::PropsSI("T", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
+        L_v = CoolProp::PropsSI("HMASS", "P", p_sys, "Q", 1.0, GetCoolPropString(X_liq)) -
+              CoolProp::PropsSI("HMASS", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
+        rho_l = CoolProp::PropsSI("DMASS", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
+        fuel_idx = GetSpeciesIndex(X_liq);
+    } else {
+        T_l = L_v = rho_l = 0.0;
+        fuel_idx = -1;
+    }
+}
+
+std::string Solver::GetCoolPropName(const std::string cantera_name){
+    std::map<std::string, std::string> cantera_to_CoolProp = {
+            {"N-C12H26","NC12H26"},
+            {"KERO_LUCHE","NC12H26"}
+    };
+    // check if it's in the map, if not throw an error. CoolProp fails silently if it doesn't recognize the name
+    if (cantera_to_CoolProp.count(cantera_name)){
+        return cantera_to_CoolProp[cantera_name];
+    } else {
+        std::cerr << "No known conversion of Cantera species " << cantera_name << " to a CoolProp species." << std::endl;
+        throw(0);
+    }
+}
+
+std::string Solver::GetCoolPropString(std::string cantera_string){
+    std::string cool_prop_name = "";
+    // Start with something like "A:0.7,B:0.3"
+    std::vector<std::string> name_val_pairs;
+    boost::split(name_val_pairs, cantera_string, [](char c){return c == ',';});
+    // Now have ["A:0.7","B:0.3"]
+    for (auto& pair : name_val_pairs){
+        // Start with "A:0.7"
+        std::vector<std::string> split_pair;
+        boost::split(split_pair, pair, [](char c){return c == ':';});
+        // Now have ["A","0.7"]
+        split_pair[0] = GetCoolPropName(split_pair[0]);
+        // Now have ["a","0.7"]
+        pair = split_pair[0] + "[" + split_pair[1] + "]";
+        // Now have "a[0.7]"
+        cool_prop_name += pair + "&";
+    }
+    cool_prop_name = cool_prop_name.substr(0,cool_prop_name.length()-1);
+    return cool_prop_name;
+}
+
+int Solver::GetSpeciesIndex(std::string cantera_string){
+    // TODO assumes single component fuel!!!
+    // Start with "A:0.7"
+    std::vector<std::string> split_pair;
+    boost::split(split_pair, cantera_string, [](char c){return c == ':';});
+    // Now have ["A","0.7"]
+    return gas->speciesIndex(split_pair[0]);
 }
 
 void Solver::ConstructMesh() {
@@ -346,11 +425,17 @@ void Solver::UpdateBCs() {
                 break;
             // Z_l
             case 2:
-                phi(N-1,k) = Z_l_in;
+                if (evaporating)
+                    phi(N-1,k) = Z_l_in;
+                else
+                    phi(N-1,k) = 0.0;
                 break;
             // m_d
             case 3:
-                phi(N-1,k) = m_d_in;
+                if (evaporating)
+                    phi(N-1,k) = m_d_in;
+                else
+                    phi(N-1,k) = 1.0e-300;
                 break;
             // Species
             default:
@@ -363,6 +448,16 @@ void Solver::UpdateBCs() {
     rho_inf = gas->density();
     double u_inf_ = mdot/rho_inf;
     a = u_inf_/L;
+}
+
+void Solver::Clipping(){
+    // TODO this is a hack and is slow
+    for (int i = 0; i < N; i++){
+        for (int k = m; k < M; k++){
+            if (phi(i,k) < 0.0)
+                phi(i,k) = 0.0;
+        }
+    }
 }
 
 void Solver::StepIntegrator() {
@@ -380,10 +475,15 @@ void Solver::StepIntegrator() {
 }
 
 double Solver::Getu(const Ref<const MatrixXd>& phi, int i){
-    //TODO this can be made vastly more efficient by keeping track of the integral
-    VectorXd rho_vec = Getrho(phi.topRows(i+1));
-    VectorXd V_vec   = phi.col(0).head(i+1);
-    return -(2.0/rho_vec(i)) * Quadrature(rho_vec.array() * V_vec.array(),dx.head(i));
+    if (i == 0){
+        // no-slip wall
+        return 0.0;
+    } else {
+        //TODO this can be made vastly more efficient by keeping track of the integral
+        VectorXd rho_vec = Getrho(phi.topRows(i + 1));
+        VectorXd V_vec = phi.col(0).head(i + 1);
+        return -(2.0 / rho_vec(i)) * Quadrature(rho_vec.array() * V_vec.array(), dx.head(i));
+    }
 }
 
 double Solver::Quadrature(const Ref<const VectorXd>& f_, const Ref<const VectorXd>& dx_){
@@ -391,6 +491,7 @@ double Solver::Quadrature(const Ref<const VectorXd>& f_, const Ref<const VectorX
     // I = 0.5*(d_0*f_0 + d_(N-2)*f_(N-1)) + 0.5*SUM_(i=0)^(N-3) (d_(i) + d_(i+1))*f_(i+1)
 
     long N_ = f_.rows();
+    assert(N_ >= 2);
     assert(dx_.rows() == N_ - 1);
     if (N_ == 2)
         return 0.5*(dx_(0)*f_(0) + dx_(N_-2)*f_(N_-1));
@@ -453,12 +554,12 @@ double Solver::Getmu(int k) {
     return mu;
 }
 
-double Solver::Getomegadot(const Ref<const RowVectorXd>& phi, int k) {
+double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
     double omegadot_;
     switch (k){
         // V
         case 0:
-            omegadot_ = rho_inf * pow(a, 2) - gas->density() * pow(phi(0), 2);
+            omegadot_ = rho_inf * pow(a, 2) - gas->density() * pow(phi_(0), 2);
             break;
         // T: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar
         case 1:
@@ -485,6 +586,68 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi, int k) {
     return omegadot_;
 }
 
+double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, int k){
+    double gammadot_;
+    double rho_ = gas->density();
+    double T_ = phi_(1);
+    double Z_l_ = phi_(2);
+    double m_d_ = phi_(3);
+    switch (k){
+        // V
+        case 0:
+            gammadot_ = 0.0;
+            break;
+        // T: - (rho*Z_l/m_d) * (cp * (T_l - T) - L_v)
+        case 1:
+            gammadot_ = - (rho_ * Z_l_ / m_d_) * (gas->cp_mass() * (T_l - T_) - L_v);
+            break;
+        // Z_l: + (rho*Z_l/m_d)
+        case 2:
+            gammadot_ = rho_ * Z_l_ / m_d_;
+            break;
+        // m_d: + rho
+        case 3:
+            gammadot_ = rho_;
+            break;
+        // Y_k: - (rho*Z_l/m_d) * delta_{k,f}
+        default:
+            if (k == m + fuel_idx)
+                gammadot_ = - rho_ * Z_l_ / m_d_;
+            else
+                gammadot_ = 0.0;
+    }
+    return gammadot_;
+}
+
+double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
+    double mdot_;
+    if (evaporating){
+        double rho_ = gas->density();
+        double T_ = phi_(1);
+        double Z_l_ = phi_(2);
+        double m_d_ = phi_(3);
+        // TODO single component fuel assumed!!!
+        // TODO simple Heaviside function evaporation law assumed!!!
+        if (T_ > T_l){
+            double A_ = 6.0/M_PI * m_d_/rho_l;
+            // energy analogy mass transfer Spalding number
+            double B_ = gas->cp_mass()*(T_ - T_l)/L_v;
+            mdot_ = -2.0*M_PI*rho_*pow(A_,1.0/3.0)*mix_diff_coeffs(fuel_idx)*log(1.0 + B_);
+        } else {
+            mdot_ = 0.0;
+        }
+        // TODO for Getmdot_liq, this is time stepping scheme dependent, and doesn't account for transport!!! Must think of a better way!!!
+        if (m_d_ + dt*mdot_ < 0.0 || mdot_ > 0.0){
+            //mdot_ = m_d_/dt + 1.0e-300;
+            mdot_ = 0.0; // this is garbage, just a hack to get it running
+        }
+            return mdot_;
+    } else {
+        mdot_ = 0.0;
+    }
+    return mdot_;
+}
+
 MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
 
     // initialize vectors and matrices
@@ -500,17 +663,17 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
         u(i) = Getu(phi, i);
         SetState(phi.row(i));
         rho_inv(i) = 1.0/gas->density();
-        // TODO implement mdot_liq, call here (for pure fuel)
+        mdot_liq(i) = Getmdot_liq(phi.row(i));
         for (int k = 0; k < M; k++){
             c(i, k) = Getc(k);
             mu(i, k) = Getmu(k);
             omegadot(i, k) = Getomegadot(phi.row(i),k);
-            // TODO implement GetGammadot, call here
+            Gammadot(i,k) = GetGammadot(phi.row(i),k);
         }
     }
 
     /*
-     * RHS          = conv + diff + src
+     * RHS          = conv + diff + src_gas + src_spray
      * conv         = -u*ddx*phi
      * diff         = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * phi))) (alternative)
      * diff         = (diag(rho_inv)*c) .* (mu .* (d2dx2 * phi))
@@ -529,17 +692,17 @@ int Solver::RunSolver() {
     std::cout << "Solver::RunSolver()" << std::endl;
 
     iteration = 0;
+    time = 0.0;
     try {
         while(!CheckStop()){
 
             // Outputs
             if (!(iteration % output_interval)){
                 Output();
-            }
-
-            if (verbose){
-                std::cout << "iteration = " << iteration << std::endl;
-                std::cout << "phi(t = " << time << ") = \n" << phi << std::endl;
+                if (verbose){
+                    std::cout << "iteration = " << iteration << std::endl;
+                    std::cout << "phi(t = " << time << ") = \n" << phi << std::endl;
+                }
             }
 
             // Loop on BCs
@@ -551,10 +714,12 @@ int Solver::RunSolver() {
             //integrator.Step();
             StepIntegrator();// non-polymorphic version for initial testing
 
+            // TODO upgrade numerics so clipping isn't necessary for species
+            Clipping();
+
             // Update counters
             iteration++;
             time += dt;
-
 
         }
 
