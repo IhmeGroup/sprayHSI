@@ -103,6 +103,7 @@ private:
     bool evaporating;
 
     // ICs
+    std::string IC_type;
     double Tgas_0;
     std::string X_0;
     VectorXd Y_0; // derived

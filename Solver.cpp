@@ -112,6 +112,7 @@ void Solver::ReadParams(int argc, char* argv[]){
                 T_wall = toml::find(Gas_, "T").as_floating();
             } else {
                 std::cerr << "Unknown Wall BC type " << wall_type << "not supported" << std::endl;
+                throw(0);
             }
             // Spray
             const auto Spray_ = toml::find(Wall_, "Spray");
@@ -127,7 +128,15 @@ void Solver::ReadParams(int argc, char* argv[]){
         const auto ICs_ = toml::find(data, "ICs");
         // Gas
         const auto Gas_ = toml::find(ICs_,"Gas");
-            Tgas_0 = toml::find(Gas_, "T").as_floating();
+            IC_type = toml::find(Gas_, "type").as_string();
+            if (IC_type == "linear_T") {
+                Tgas_0 = -1.0;
+            } else if (IC_type == "constant_T") {
+                Tgas_0 = toml::find(Gas_, "T").as_floating();
+            } else {
+                std::cerr << "Unknown IC type " << IC_type << "not supported" << std::endl;
+                throw(0);
+            }
             X_0 = toml::find(Gas_, "X").as_string();
         // Spray
         const auto Spray_ = toml::find(ICs_,"Spray");
@@ -147,7 +156,7 @@ void Solver::SetupGas() {
     M = m + gas->nSpecies();
 
     if (verbose) {
-        gas->setState_TPX(Tgas_0, p_sys, X_0);
+        gas->setState_TPX(T_in, p_sys, X_0);
         std::cout << "  SetupGas() at T = " << gas->temperature() << " and p = " << gas->pressure()
                   << " gives viscosity = " << trans->viscosity() << " for X = " << X_0 << std::endl;
     }
@@ -158,7 +167,7 @@ void Solver::DerivedParams() {
     Map<const VectorXd> md_(gas->massFractions(), gas->nSpecies());
 
     // Initial mass fractions
-    gas->setState_TPX(Tgas_0,p_sys,X_0);
+    gas->setState_TPX(T_in,p_sys,X_0); // choice of temperature shouldn't make a difference for computing mass fractions here
     Y_0 = md_;
 
     // Inlet mass fractions
@@ -335,7 +344,14 @@ void Solver::SetIC() {
                 break;
             // T
             case 1:
-                phi.col(k) = Tgas_0*VectorXd::Constant(N,1.0);
+                if (IC_type == "linear_T"){
+                    phi.col(k) = VectorXd::LinSpaced(N,T_wall,T_in);
+                } else if (IC_type == "constant_T"){
+                    phi.col(k) = Tgas_0*VectorXd::Constant(N,1.0);
+                } else {
+                    // should have already caught this "unknown type" error
+                    throw(0);
+                }
                 break;
             // Z_l
             case 2:
