@@ -156,7 +156,7 @@ void Solver::SetupGas() {
     M = m + gas->nSpecies();
 
     if (verbose) {
-        gas->setState_TPX(T_in, p_sys, X_0);
+        gas->setState_TPX(T_in, p_sys, X_0); // TODO this comes out as X_in ?!?
         std::cout << "  SetupGas() at T = " << gas->temperature() << " and p = " << gas->pressure()
                   << " gives viscosity = " << trans->viscosity() << " for X = " << X_0 << std::endl;
     }
@@ -712,6 +712,11 @@ int Solver::RunSolver() {
     try {
         while(!CheckStop()){
 
+            // Loop on BCs
+            //inlet_bc.Update();
+            //wall_bc.Update();
+            UpdateBCs(); // non-polymorphic version for initial testing
+
             // Outputs
             if (!(iteration % output_interval)){
                 Output();
@@ -720,11 +725,6 @@ int Solver::RunSolver() {
                     std::cout << "phi(t = " << time << ") = \n" << phi << std::endl;
                 }
             }
-
-            // Loop on BCs
-            //inlet_bc.Update();
-            //wall_bc.Update();
-            UpdateBCs(); // non-polymorphic version for initial testing
 
             // Integrate ODE
             //integrator.Step();
