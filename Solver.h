@@ -48,6 +48,8 @@ private:
     std::string GetCoolPropString(std::string cantera_string);
     std::string GetCoolPropName(std::string cantera_name);
     int GetSpeciesIndex(std::string cantera_string);
+    void AdjustRHS(Ref<MatrixXd> RHS);
+    void SetDerivedVars();
 
     /*
      * Solution tensor \\phi, NxM
@@ -65,6 +67,9 @@ private:
     // Physics
     int M;      // number of variables per node (dimensionality)            [-]
     int m;      // number of non-species variables per node (M - nSpecies)  [-]
+
+    // Numerics
+    std::string time_scheme;
 
     // Mesh
         // Space

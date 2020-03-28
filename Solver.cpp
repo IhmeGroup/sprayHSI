@@ -62,6 +62,12 @@ void Solver::ReadParams(int argc, char* argv[]){
         m = toml::find(Physics_, "m").as_integer();
     }
 
+    // Numerics
+    {
+        const auto Numerics_ = toml::find(data, "Numerics");
+        time_scheme = toml::find(Numerics_, "time_scheme").as_string();
+    }
+
     // Gas
     {
         const auto Gas_ = toml::find(data, "Gas");
@@ -131,6 +137,9 @@ void Solver::ReadParams(int argc, char* argv[]){
             IC_type = toml::find(Gas_, "type").as_string();
             if (IC_type == "linear_T") {
                 Tgas_0 = -1.0;
+                if (wall_type == "adiabatic"){
+                    std::cerr << "IC_type " << IC_type << " and wall_type " << wall_type << " not a permitted combination" << std::endl;
+                }
             } else if (IC_type == "constant_T") {
                 Tgas_0 = toml::find(Gas_, "T").as_floating();
             } else {
@@ -176,15 +185,12 @@ void Solver::DerivedParams() {
 
     // Mixture diffusion coefficients (mass-based by default)
     mix_diff_coeffs.resize(gas->nSpecies());
-    trans->getMixDiffCoeffs(mix_diff_coeffs.data());
 
     // Molar production rates
     omega_dot_mol.resize(gas->nSpecies());
-    kin->getNetProductionRates(omega_dot_mol.data());
 
     // Species molar enthalpies
     species_enthalpies_mol.resize((gas->nSpecies()));
-    gas->getPartialMolarEnthalpies(species_enthalpies_mol.data());
 
     // Spray parameters
     // TODO change for multicomponent spray
@@ -478,16 +484,36 @@ void Solver::Clipping(){
 
 void Solver::StepIntegrator() {
     // TODO make polymorphic!!
-    // Fwd Euler
-    // Get RHS
-    MatrixXd RHS = GetRHS(time,phi);
+
+    if (time_scheme == "fwd_euler"){
+        // Fwd Euler
+        // Get RHS
+        MatrixXd RHS = GetRHS(time,phi);
+        AdjustRHS(RHS);
+        phi = phi + dt*RHS;
+    } else if (time_scheme == "TVD_RK3"){
+        // TVD RK3 (Gottlieb and Shu, with time evaluations from here: http://www.cosmo-model.org/content/consortium/userSeminar/seminar2006/6_advanced_numerics_seminar/Baldauf_Runge_Kutta.pdf)
+        MatrixXd RHSn_ = GetRHS(time,phi);
+        AdjustRHS(RHSn_);
+        MatrixXd phi1_ = phi + dt*RHSn_;
+        MatrixXd RHS1_ = GetRHS(time + dt,phi1_);
+        AdjustRHS(RHS1_);
+        MatrixXd phi2_ = (3.0/4.0) * phi + (1.0/4.0) * phi1_ + (1.0/4.0) * dt * RHS1_;
+        MatrixXd RHS2_ = GetRHS(time + dt/2.0,phi2_);
+        AdjustRHS(RHS2_);
+        phi = (1.0/3.0) * phi + (2.0/3.0) * phi2_ + (2.0/3.0) * dt * RHS2_;
+    } else {
+        std::cerr << "Temporal scheme " << time_scheme << " not recognized." << std::endl;
+        throw(0);
+    }
+}
+
+void Solver::AdjustRHS(Ref<MatrixXd> RHS){
     // Don't update V, T, or Y_k (these have wall BCs, the spray advection eqns do not)
     RHS.row(0).head(2) = RowVectorXd::Zero(2);
     RHS.row(0).tail(gas->nSpecies()) = RowVectorXd::Zero(gas->nSpecies());
     // Don't update anything at inlet (we impose BCs for all variables here)
     RHS.row(RHS.rows()-1) = RowVectorXd::Zero(RHS.cols());
-
-    phi = phi + dt*RHS;
 }
 
 double Solver::Getu(const Ref<const MatrixXd>& phi, int i){
@@ -579,8 +605,9 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
             break;
         // T: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar
         case 1:
-            if (reacting)
-                omegadot_ = - species_enthalpies_mol.dot(omega_dot_mol);
+            if (reacting) {
+                omegadot_ = -species_enthalpies_mol.dot(omega_dot_mol);
+            }
             else
                 omegadot_ = 0.0;
             break;
@@ -594,12 +621,20 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
             break;
         // Species: omegadot_i^molar * molarmass_i
         default:
-            if (reacting)
-                omegadot_ = omega_dot_mol(k-m)*gas->molecularWeight(k-m);
-            else
+            if (reacting) {
+                omegadot_ = omega_dot_mol(k - m) * gas->molecularWeight(k - m);
+            }
+            else {
                 omegadot_ = 0.0;
+            }
     }
     return omegadot_;
+}
+
+void Solver::SetDerivedVars(){
+    gas->getPartialMolarEnthalpies(species_enthalpies_mol.data());
+    kin->getNetProductionRates(omega_dot_mol.data());
+    trans->getMixDiffCoeffs(mix_diff_coeffs.data());
 }
 
 double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, int k){
@@ -678,6 +713,7 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
     for (int i = 0; i < N; i++){
         u(i) = Getu(phi, i);
         SetState(phi.row(i));
+        SetDerivedVars();
         rho_inv(i) = 1.0/gas->density();
         mdot_liq(i) = Getmdot_liq(phi.row(i));
         for (int k = 0; k < M; k++){
@@ -731,7 +767,7 @@ int Solver::RunSolver() {
             StepIntegrator();// non-polymorphic version for initial testing
 
             // TODO upgrade numerics so clipping isn't necessary for species
-            Clipping();
+            //Clipping();
 
             // Update counters
             iteration++;
