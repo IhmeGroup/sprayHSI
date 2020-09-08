@@ -54,15 +54,18 @@ private:
     /*
      * Solution tensor \\phi, NxM
      * \\(.) is a tensor, \(.) is a vector
-     * \\phi = [\V, \T, \Y1, ..., \Ym, \Zl, \md]
+     * \\phi = [\V, \T, \Z_l, \m_d, \Y1, ..., \YN]
      */
     MatrixXd phi;
 
     // IO
     bool verbose;
     std::string input_file;
+    std::string input_name;
     int iteration;
     int output_interval; //TODO could add an output interval in time as well
+    std::string output_path;
+    std::string output_header;
 
     // Physics
     int M;      // number of variables per node (dimensionality)            [-]

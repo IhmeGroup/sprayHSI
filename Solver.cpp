@@ -40,6 +40,7 @@ void Solver::ReadParams(int argc, char* argv[]){
         const auto IO_ = toml::find(data, "IO");
         verbose = toml::find(IO_, "verbose").as_boolean();
         output_interval = toml::find(IO_, "output_interval").as_integer();
+        output_path = toml::find(IO_, "output_path").as_string();
     }
 
     // Mesh
@@ -172,6 +173,25 @@ void Solver::SetupGas() {
 }
 
 void Solver::DerivedParams() {
+    // Input file name without path
+    // Start with something like "/Users/.../inputFile.in"
+    std::vector<std::string> split_string_;
+    boost::split(split_string_, input_file, [](char c){return c == '/';});
+    // Now have ["Users","...","inputFile.in"]
+    std::vector<std::string> tmp_;
+    boost::split(tmp_, split_string_[split_string_.size() - 1], [](char c){return c == '.';});
+    // Now have ["inputFile","in"]
+    input_name = tmp_[0];
+
+    // Header for output files
+    output_header = "TITLE = \"" + input_name + "\"";
+    output_header += "\nVARIABLES = \"X\", \"u\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
+    for (int i = 0; i < gas->nSpecies(); i++){
+        output_header += " \"Y_" + gas->speciesName(i) + "\"";
+        if (i != gas->nSpecies() - 1) output_header += ",";
+    }
+    output_header += "\nZONE I=" + std::to_string(N) + ", F=POINT";
+
     // Map of pointer to mass fractions array
     Map<const VectorXd> md_(gas->massFractions(), gas->nSpecies());
 
@@ -386,7 +406,7 @@ bool Solver::CheckStop() {
 }
 
 void Solver::Output() {
-    // TODO add output to file
+    // Console output
     std::cout << "---------------------------------------------------------" << std::endl;
     std::cout << "  Solver::Output()" << std::endl;
     std::cout << "  iteration = " << iteration << std::endl;
@@ -396,6 +416,25 @@ void Solver::Output() {
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "V [1/s]" << std::setw(width_) << "T [K]" <<'\n';
     for (int i = 0; i < N; i++){
         std::cout << std::left << std::setw(width_) << i << std::setw(width_) << nodes(i) << std::setw(width_) << phi(i,0) << std::setw(width_) << phi(i,1) << std::endl;
+    }
+
+    // File output
+    std::string output_name_ = input_name + "_" + std::to_string(iteration) + ".dat";
+    std::ofstream output_file(output_path + output_name_);
+    if (output_file.is_open()){
+        std::cout << "Writing " << output_name_ << std::endl;
+        output_file << output_header << std::endl;
+        VectorXd rho_ = Getrho(phi);
+        VectorXd u_(VectorXd::Zero(N));
+        for (int i = 0; i < N; i++){
+            u_(i) = Getu(phi,i);
+        }
+        MatrixXd outmat_(N, M + 3); // X u_ rho_ phi
+        outmat_ << nodes, u_, rho_, phi;
+        output_file << outmat_ << std::endl;
+        output_file.close();
+    } else {
+        std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
     }
 }
 
