@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include "nvector/nvector_serial.h"
 #include "cantera/thermo.h"
 #include "cantera/kinetics.h"
 #include "cantera/transport.h"
@@ -15,6 +16,8 @@
 using namespace Eigen;
 using namespace Cantera;
 
+class RHSFunctor;
+
 class Solver {
 
 public:
@@ -22,6 +25,7 @@ public:
     ~Solver();
 
     void ReadParams(int argc, char* argv[]);
+    void SetupSolver();
     void SetupGas();
     void DerivedParams();
     void ConstructMesh();
@@ -29,13 +33,15 @@ public:
     void SetIC();
     int RunSolver();
 
+  MatrixXd GetRHS(double time, const Ref<const MatrixXd>& phi);
+
 private:
     bool CheckStop();
     void Output();
     void StepIntegrator();
     void UpdateBCs();
     void Clipping();
-    MatrixXd GetRHS(double time, const Ref<const MatrixXd>& phi);
+
     double Getu(const Ref<const MatrixXd>& phi, int i);
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
     VectorXd Getrho(const Ref<const MatrixXd>& phi);
@@ -50,6 +56,9 @@ private:
     int GetSpeciesIndex(std::string cantera_string);
     void AdjustRHS(Ref<MatrixXd> RHS);
     void SetDerivedVars();
+    void CheckCVODE(std::string func_name, int flag);
+
+    static int cvode_RHS(double t, N_Vector y, N_Vector ydot, void *f_data);
 
     /*
      * Solution tensor \\phi, NxM
@@ -73,8 +82,14 @@ private:
 
     // Numerics
     std::string time_scheme;
+      // CVODE
+      void* cvode_mem;
+      long int cvode_N;
+      long int cvode_nsteps = 0;
+      N_Vector cvode_y;
+      RHSFunctor* p_rhs_functor;
 
-    // Mesh
+  // Mesh
         // Space
         VectorXd nodes;
         VectorXd dx;

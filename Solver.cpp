@@ -9,6 +9,10 @@
 #include "toml.hpp"
 #include "CoolProp.h"
 #include "boost/algorithm/string.hpp"
+#include "cvode/cvode.h"
+#include "cvode/cvode_dense.h"
+#include "sundials/sundials_types.h"
+#include "RHSFunctor.h"
 
 Solver::Solver() {
     std::cout << "Solver::Solver()" << std::endl;
@@ -153,6 +157,47 @@ void Solver::ReadParams(int argc, char* argv[]){
             Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
             m_d_0 = toml::find(Spray_, "m_d").as_floating();
     }
+}
+
+void Solver::SetupSolver() {
+  if (time_scheme == "CVODE") {
+    // Steps from Sec. 4.4 of CVODE User Guide (V2.7.0)
+    int flag_;
+    double abstol = 1e-5; // real tolerance of system
+    double reltol = 1e-5; // absolute tolerance of system
+    double t0 = 0.0; // initial time
+
+    // 2. Set problem dimensions
+    cvode_N = N * M;
+
+    // 3. Set vector of initial values
+    cvode_y = N_VNew_Serial(cvode_N);
+    Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M) = phi;
+
+    // 4. Create CVODE object
+    cvode_mem = NULL;
+    cvode_mem = CVodeCreate(CV_BDF, CV_NEWTON);
+
+    // 5. Initialize CVODE solver
+    CheckCVODE("CVodeInit", CVodeInit(cvode_mem, cvode_RHS, t0, cvode_y));
+
+    // 6. Specify integration tolerances
+    CheckCVODE("CVodeSStolerances" ,CVodeSStolerances(cvode_mem, reltol, abstol));
+
+    // 7. Set optional inputs
+    p_rhs_functor = new RHSFunctor(N, M, this);
+    CheckCVODE("CVodeSetUserData", CVodeSetUserData(cvode_mem, p_rhs_functor));
+
+    // 8. Attach linear solver module
+    CheckCVODE("CVDense", CVDense(cvode_mem, cvode_N));
+  }
+}
+
+void Solver::CheckCVODE(std::string func_name, int flag) {
+  if (flag != CV_SUCCESS){
+    std::cerr << func_name << "failed!" << std::endl;
+    throw(0);
+  }
 }
 
 void Solver::SetupGas() {
@@ -411,6 +456,9 @@ void Solver::Output() {
     std::cout << "  Solver::Output()" << std::endl;
     std::cout << "  iteration = " << iteration << std::endl;
     std::cout << "  time = " << time << "[s]" << std::endl;
+    if (time_scheme == "CVODE"){
+      std::cout << "  ODE steps = " << cvode_nsteps << std::endl;
+    }
 
     int width_ = 10;
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "V [1/s]" << std::setw(width_) << "T [K]" <<'\n';
@@ -528,19 +576,25 @@ void Solver::StepIntegrator() {
         // Fwd Euler
         // Get RHS
         MatrixXd RHS = GetRHS(time,phi);
-        AdjustRHS(RHS);
+        //AdjustRHS(RHS);
         phi = phi + dt*RHS;
-    } else if (time_scheme == "TVD_RK3"){
-        // TVD RK3 (Gottlieb and Shu, with time evaluations from here: http://www.cosmo-model.org/content/consortium/userSeminar/seminar2006/6_advanced_numerics_seminar/Baldauf_Runge_Kutta.pdf)
-        MatrixXd RHSn_ = GetRHS(time,phi);
-        AdjustRHS(RHSn_);
-        MatrixXd phi1_ = phi + dt*RHSn_;
-        MatrixXd RHS1_ = GetRHS(time + dt,phi1_);
-        AdjustRHS(RHS1_);
-        MatrixXd phi2_ = (3.0/4.0) * phi + (1.0/4.0) * phi1_ + (1.0/4.0) * dt * RHS1_;
-        MatrixXd RHS2_ = GetRHS(time + dt/2.0,phi2_);
-        AdjustRHS(RHS2_);
-        phi = (1.0/3.0) * phi + (2.0/3.0) * phi2_ + (2.0/3.0) * dt * RHS2_;
+    } else if (time_scheme == "TVD_RK3") {
+      // TVD RK3 (Gottlieb and Shu, with time evaluations from here: http://www.cosmo-model.org/content/consortium/userSeminar/seminar2006/6_advanced_numerics_seminar/Baldauf_Runge_Kutta.pdf)
+      MatrixXd RHSn_ = GetRHS(time, phi);
+      //AdjustRHS(RHSn_);
+      MatrixXd phi1_ = phi + dt * RHSn_;
+      MatrixXd RHS1_ = GetRHS(time + dt, phi1_);
+      //AdjustRHS(RHS1_);
+      MatrixXd phi2_ = (3.0 / 4.0) * phi + (1.0 / 4.0) * phi1_ + (1.0 / 4.0) * dt * RHS1_;
+      MatrixXd RHS2_ = GetRHS(time + dt / 2.0, phi2_);
+      //AdjustRHS(RHS2_);
+      phi = (1.0 / 3.0) * phi + (2.0 / 3.0) * phi2_ + (2.0 / 3.0) * dt * RHS2_;
+    } else if (time_scheme == "CVODE") {
+      // CVODE BDF with numerical Jacobian
+      double t_solver;
+      CheckCVODE("CVode", CVode(cvode_mem, time + dt, cvode_y, &t_solver, CV_NORMAL));
+      phi = Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M);
+      CVodeGetNumSteps(cvode_mem, &cvode_nsteps);
     } else {
         std::cerr << "Temporal scheme " << time_scheme << " not recognized." << std::endl;
         throw(0);
@@ -776,7 +830,11 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
     MatrixXd src_gas  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
     MatrixXd src_spray = (rho_inv.asDiagonal() * c).array() * (mdot_liq.asDiagonal() * Gammadot).array();
 
-    return conv + diff + src_gas + src_spray;
+    MatrixXd out = conv + diff + src_gas + src_spray;
+
+    AdjustRHS(out);
+
+    return out;
 }
 
 int Solver::RunSolver() {
@@ -824,6 +882,14 @@ int Solver::RunSolver() {
 
 }
 
+int Solver::cvode_RHS(double t, N_Vector y, N_Vector ydot, void* f_data) {
+  double* ydata = NV_DATA_S(y);
+  double* ydotdata = NV_DATA_S(ydot);
+  auto f = (RHSFunctor*) f_data;
+  return f->rhs(t, ydata, ydotdata);
+}
+
 Solver::~Solver() {
     std::cout << "Solver::~Solver()" << std::endl;
+    // TODO deallocate and free Cvode stuff (steps 13 and 14)
 }
