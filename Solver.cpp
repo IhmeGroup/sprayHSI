@@ -71,6 +71,10 @@ void Solver::ReadParams(int argc, char* argv[]){
     {
         const auto Numerics_ = toml::find(data, "Numerics");
         time_scheme = toml::find(Numerics_, "time_scheme").as_string();
+        if (time_scheme == "CVODE"){
+          cvode_abstol = toml::find(Numerics_, "cvode_abstol").as_floating();
+          cvode_reltol = toml::find(Numerics_, "cvode_reltol").as_floating();
+        }
     }
 
     // Gas
@@ -162,9 +166,6 @@ void Solver::ReadParams(int argc, char* argv[]){
 void Solver::SetupSolver() {
   if (time_scheme == "CVODE") {
     // Steps from Sec. 4.4 of CVODE User Guide (V2.7.0)
-    int flag_;
-    double abstol = 1e-5; // real tolerance of system
-    double reltol = 1e-5; // absolute tolerance of system
     double t0 = 0.0; // initial time
 
     // 2. Set problem dimensions
@@ -182,7 +183,7 @@ void Solver::SetupSolver() {
     CheckCVODE("CVodeInit", CVodeInit(cvode_mem, cvode_RHS, t0, cvode_y));
 
     // 6. Specify integration tolerances
-    CheckCVODE("CVodeSStolerances" ,CVodeSStolerances(cvode_mem, reltol, abstol));
+    CheckCVODE("CVodeSStolerances" ,CVodeSStolerances(cvode_mem, cvode_reltol, cvode_abstol));
 
     // 7. Set optional inputs
     p_rhs_functor = new RHSFunctor(N, M, this);
@@ -834,6 +835,10 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
 
     AdjustRHS(out);
 
+    // DEBUG
+    //std::cout << "RHS = " << std::endl << out << std::endl;
+    // TODO species don't work with CVODE. Maybe need to set HMAX?
+
     return out;
 }
 
@@ -891,5 +896,6 @@ int Solver::cvode_RHS(double t, N_Vector y, N_Vector ydot, void* f_data) {
 
 Solver::~Solver() {
     std::cout << "Solver::~Solver()" << std::endl;
-    // TODO deallocate and free Cvode stuff (steps 13 and 14)
+    N_VDestroy_Serial(cvode_y);
+    CVodeFree(&cvode_mem);
 }

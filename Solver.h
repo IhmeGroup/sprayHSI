@@ -86,6 +86,8 @@ private:
       void* cvode_mem;
       long int cvode_N;
       long int cvode_nsteps = 0;
+      double cvode_abstol;
+      double cvode_reltol;
       N_Vector cvode_y;
       RHSFunctor* p_rhs_functor;
 
