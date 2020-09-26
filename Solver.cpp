@@ -218,6 +218,77 @@ void Solver::SetupGas() {
     }
 }
 
+void Solver::SetBCs() {
+  // Wall
+  for (int k = 0; k < M; k++){
+    switch (k){
+      //V
+      case 0:
+        wall_BC(k) = 0.0;
+        break;
+      // T
+      case 1:
+        if (wall_type == "isothermal")
+          wall_BC(k) = T_wall;
+        else if (wall_type == "adiabatic")
+          // 1st order one-sided difference
+          wall_BC(k) = phi(0,k);
+        else
+          std::cerr << "unknown wall type and this should be polymorphic anyway" << std::endl;
+        break;
+      // TODO ensure that this is mathematically correct for Z_l and m_d BCs
+      // Z_l
+      case 2:
+        break;
+      // m_d
+      case 3:
+        break;
+      // Species
+      default:
+        // Species have no flux at wall for now... change when multiphase and filming
+        wall_BC(k) = phi(0,k);
+    }
+  }
+
+  // Inlet
+  for (int k = 0; k < M; k++){
+    switch (k){
+      //V
+      case 0:
+        inlet_BC(k) = 0.0;
+        break;
+        // T
+      case 1:
+        inlet_BC(k) = T_in;
+        break;
+        // Z_l
+      case 2:
+        if (evaporating)
+          inlet_BC(k) = Z_l_in;
+        else
+          inlet_BC(k) = 0.0;
+        break;
+        // m_d
+      case 3:
+        if (evaporating)
+          inlet_BC(k) = m_d_in;
+        else
+          inlet_BC(k) = 1.0e-300;
+        break;
+        // Species
+      default:
+        inlet_BC(k) = Y_in(k-m);
+    }
+  }
+
+  // Global strain rate
+  SetState(inlet_BC);
+  rho_inf = gas->density();
+  double u_inf_ = mdot/rho_inf;
+  a = u_inf_/L;
+
+}
+
 void Solver::DerivedParams() {
     // Input file name without path
     // Start with something like "/Users/.../inputFile.in"
@@ -323,34 +394,41 @@ void Solver::ConstructMesh() {
     // TODO make this polymorphic
 
     /*
-     *      MESH SETUP
+     *      MESH SETUP: THERE ARE N+2 NODES, OF WHICH 2 ARE BCS
      *
      *      WALL                                                INLET
      *      |---> +x
      *
      *      | |----------|----------|----------| ... |----------| |
-     *       0   dx[0]   1  dx[1]   2   dx[2]       N-2  dx[N-2]  N-1
+     *       0   dx[0]   1  dx[1]   2   dx[2]        N  dx[N]   N+1
      *
      */
 
     // resize vectors
-    dx = VectorXd::Zero(N-1);
-    nodes = VectorXd::Zero(N);
+    dx = VectorXd::Zero(N+1);
+    nodes = VectorXd::Zero(N+2);
 
     // constant spacing for now, but this could be specified from input (e.g. log spacing)
-    double dx_ = L/(N-1);
-    dx = dx_*VectorXd::Constant(N,1.0);
+    double dx_ = L/(N+1);
+    dx = dx_*VectorXd::Constant(N+1,1.0);
 
     // loop over node vector and fill according to spacing vector
     nodes(0) = 0.0;
-    nodes(N-1) = L;
-    for (int i = 1; i < N-1; i++){
+    nodes(N+1) = L;
+    for (int i = 1; i < N+1; i++){
         nodes(i) = nodes(i-1) + dx(i-1);
     }
     if (verbose){
         std::cout << "dx = \n" << dx << std::endl;
         std::cout << "nodes = \n" << nodes << std::endl;
     }
+
+    // resize matrix
+    phi = MatrixXd::Zero(N,M);
+
+    // resize BCs
+    wall_BC = RowVectorXd::Zero(M);
+    inlet_BC = RowVectorXd::Zero(M);
 }
 
 void Solver::ConstructOperators() {
@@ -358,18 +436,20 @@ void Solver::ConstructOperators() {
 
     // TODO make this polymorphic
 
+    // Matrices are N x N+2 such that [ddx][wall_BC , phi, inlet_BC]^T = dphi/dx, N x 1.
+
     // ddx
     // 1st-order 'upwinded' (but downwinded on the grid because convection is always in -ve x direction)
 
     // resize matrix
-    ddx = MatrixXd::Zero(N,N);
+    ddx = MatrixXd::Zero(N,N+2);
 
     // fill matrix
-    for (int i = 1; i < N-1; i++){
-        for (int j = 0; j < N; j++){
-            if (i == j){
-                ddx(i,j)   = -1.0/dx[i];
-                ddx(i,j+1) =  1.0/dx[i];
+    for (int i = 0; i < N; i++){
+        for (int j = 0; j < N+2; j++){
+            if (i+1 == j){
+                ddx(i,j)   = -1.0/dx[i+1];
+                ddx(i,j+1) =  1.0/dx[i+1];
             }
         }
     }
@@ -379,13 +459,13 @@ void Solver::ConstructOperators() {
     //TODO this is only 2nd-order for uniform grids! must include extra terms for non-uniform or else 0th order!!
 
     // resize matrix
-    d2dx2 = MatrixXd::Zero(N,N);
+    d2dx2 = MatrixXd::Zero(N,N+2);
 
     // fill matrix
-    for (int i = 1; i < N-1; i++){
-        for (int j = 0; j < N; j++){
-            if (i == j){
-                double dx2_ = (pow(dx(i-1),2) + pow(dx(i),2))/2.0;
+    for (int i = 0; i < N; i++){
+        for (int j = 0; j < N+2; j++){
+            if (i+1 == j){
+                double dx2_ = (pow(dx(i),2) + pow(dx(i+1),2))/2.0;
                 d2dx2(i,j-1) =  1.0/dx2_;
                 d2dx2(i,j)   = -2.0/dx2_;
                 d2dx2(i,j+1) =  1.0/dx2_;
@@ -404,9 +484,6 @@ void Solver::SetIC() {
 
     // TODO make this polymorphic
 
-    // resize matrix
-    phi = MatrixXd::Zero(N,M);
-
     // loop over all variables
     for (int k = 0; k < M; k++){
         switch (k){
@@ -417,7 +494,7 @@ void Solver::SetIC() {
             // T
             case 1:
                 if (IC_type == "linear_T"){
-                    phi.col(k) = VectorXd::LinSpaced(N,T_wall,T_in);
+                    phi.col(k) = VectorXd::LinSpaced(N,T_wall,T_in); //TODO this needs to be fixed to avoid 'step' at BCs
                 } else if (IC_type == "constant_T"){
                     phi.col(k) = Tgas_0*VectorXd::Constant(N,1.0);
                 } else {
@@ -442,6 +519,9 @@ void Solver::SetIC() {
     if (verbose){
         std::cout << "phi_0 = \n" << phi << std::endl;
     }
+
+    // Set BCs to match ICs
+    SetBCs();
 }
 
 bool Solver::CheckStop() {
@@ -461,10 +541,14 @@ void Solver::Output() {
       std::cout << "  ODE steps = " << cvode_nsteps << std::endl;
     }
 
+    // Create Phi = [wall_BC, phi, inlet_BC]^T
+    MatrixXd Phi(wall_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
+    Phi << wall_BC, phi, inlet_BC;
+
     int width_ = 10;
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "V [1/s]" << std::setw(width_) << "T [K]" <<'\n';
-    for (int i = 0; i < N; i++){
-        std::cout << std::left << std::setw(width_) << i << std::setw(width_) << nodes(i) << std::setw(width_) << phi(i,0) << std::setw(width_) << phi(i,1) << std::endl;
+    for (int i = 0; i < N+2; i++){
+        std::cout << std::left << std::setw(width_) << i << std::setw(width_) << nodes(i) << std::setw(width_) << Phi(i,0) << std::setw(width_) << Phi(i,1) << std::endl;
     }
 
     // File output
@@ -473,13 +557,13 @@ void Solver::Output() {
     if (output_file.is_open()){
         std::cout << "Writing " << output_name_ << std::endl;
         output_file << output_header << std::endl;
-        VectorXd rho_ = Getrho(phi);
-        VectorXd u_(VectorXd::Zero(N));
-        for (int i = 0; i < N; i++){
-            u_(i) = Getu(phi,i);
+        VectorXd rho_ = Getrho(Phi);
+        VectorXd u_(VectorXd::Zero(N+2));
+        for (int i = 0; i < N+2; i++){
+            u_(i) = Getu(Phi,i);
         }
-        MatrixXd outmat_(N, M + 3); // X u_ rho_ phi
-        outmat_ << nodes, u_, rho_, phi;
+        MatrixXd outmat_(N+2, M + 3); // X u_ rho_ phi
+        outmat_ << nodes, u_, rho_, Phi;
         output_file << outmat_ << std::endl;
         output_file.close();
     } else {
@@ -487,137 +571,41 @@ void Solver::Output() {
     }
 }
 
-void Solver::UpdateBCs() {
-    // TODO make this polymorphic!!
-    // Isothermal wall and mdot inlet for now
-
-    // Wall
-    for (int k = 0; k < M; k++){
-        switch (k){
-            //V
-            case 0:
-                phi(0,k) = 0.0;
-                break;
-            // T
-            case 1:
-                if (wall_type == "isothermal")
-                    phi(0,k) = T_wall;
-                else if (wall_type == "adiabatic")
-                    // 1st order one-sided difference
-                    phi(0,k) = phi(1,k);
-                else
-                    std::cerr << "unknown wall type and this should be polymorphic anyway" << std::endl;
-                break;
-            // TODO ensure that this is mathematically correct for Z_l and m_d BCs
-            // Z_l
-            case 2:
-                break;
-            // m_d
-            case 3:
-                break;
-            // Species
-            default:
-                // Species have no flux at wall for now... change when multiphase and filming
-                phi(0,k) = phi(1,k);
-        }
-    }
-
-    // Inlet
-    for (int k = 0; k < M; k++){
-        switch (k){
-            //V
-            case 0:
-                phi(N-1,k) = 0.0;
-                break;
-            // T
-            case 1:
-                phi(N-1,k) = T_in;
-                break;
-            // Z_l
-            case 2:
-                if (evaporating)
-                    phi(N-1,k) = Z_l_in;
-                else
-                    phi(N-1,k) = 0.0;
-                break;
-            // m_d
-            case 3:
-                if (evaporating)
-                    phi(N-1,k) = m_d_in;
-                else
-                    phi(N-1,k) = 1.0e-300;
-                break;
-            // Species
-            default:
-                phi(N-1,k) = Y_in(k-m);
-        }
-    }
-
-    // Global strain rate
-    SetState(phi.row(N-1));
-    rho_inf = gas->density();
-    double u_inf_ = mdot/rho_inf;
-    a = u_inf_/L;
-}
-
-void Solver::Clipping(){
-    // TODO this is a hack and is slow
-    for (int i = 0; i < N; i++){
-        for (int k = m; k < M; k++){
-            if (phi(i,k) < 0.0)
-                phi(i,k) = 0.0;
-        }
-    }
-}
-
 void Solver::StepIntegrator() {
-    // TODO make polymorphic!!
+  // TODO make polymorphic!!
 
-    if (time_scheme == "fwd_euler"){
-        // Fwd Euler
-        // Get RHS
-        MatrixXd RHS = GetRHS(time,phi);
-        //AdjustRHS(RHS);
-        phi = phi + dt*RHS;
-    } else if (time_scheme == "TVD_RK3") {
-      // TVD RK3 (Gottlieb and Shu, with time evaluations from here: http://www.cosmo-model.org/content/consortium/userSeminar/seminar2006/6_advanced_numerics_seminar/Baldauf_Runge_Kutta.pdf)
-      MatrixXd RHSn_ = GetRHS(time, phi);
-      //AdjustRHS(RHSn_);
-      MatrixXd phi1_ = phi + dt * RHSn_;
-      MatrixXd RHS1_ = GetRHS(time + dt, phi1_);
-      //AdjustRHS(RHS1_);
-      MatrixXd phi2_ = (3.0 / 4.0) * phi + (1.0 / 4.0) * phi1_ + (1.0 / 4.0) * dt * RHS1_;
-      MatrixXd RHS2_ = GetRHS(time + dt / 2.0, phi2_);
-      //AdjustRHS(RHS2_);
-      phi = (1.0 / 3.0) * phi + (2.0 / 3.0) * phi2_ + (2.0 / 3.0) * dt * RHS2_;
-    } else if (time_scheme == "CVODE") {
-      // CVODE BDF with numerical Jacobian
-      double t_solver;
-      CheckCVODE("CVode", CVode(cvode_mem, time + dt, cvode_y, &t_solver, CV_NORMAL));
-      phi = Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M);
-      CVodeGetNumSteps(cvode_mem, &cvode_nsteps);
-    } else {
-        std::cerr << "Temporal scheme " << time_scheme << " not recognized." << std::endl;
-        throw(0);
-    }
+  if (time_scheme == "fwd_euler"){
+    // Fwd Euler
+    MatrixXd RHS = GetRHS(time, phi);
+    phi = phi + dt*RHS;
+  } else if (time_scheme == "TVD_RK3") {
+    // TVD RK3 (Gottlieb and Shu, with time evaluations from here: http://www.cosmo-model.org/content/consortium/userSeminar/seminar2006/6_advanced_numerics_seminar/Baldauf_Runge_Kutta.pdf)
+    MatrixXd RHSn_ = GetRHS(time, phi);
+    MatrixXd phi1_ = phi + dt * RHSn_;
+    MatrixXd RHS1_ = GetRHS(time + dt, phi1_);
+    MatrixXd phi2_ = (3.0 / 4.0) * phi + (1.0 / 4.0) * phi1_ + (1.0 / 4.0) * dt * RHS1_;
+    MatrixXd RHS2_ = GetRHS(time + dt / 2.0, phi2_);
+    phi = (1.0 / 3.0) * phi + (2.0 / 3.0) * phi2_ + (2.0 / 3.0) * dt * RHS2_;
+  } else if (time_scheme == "CVODE") {
+    // CVODE BDF with numerical Jacobian
+    double t_solver;
+    CheckCVODE("CVode", CVode(cvode_mem, time + dt, cvode_y, &t_solver, CV_NORMAL));
+    phi = Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M);
+    CVodeGetNumSteps(cvode_mem, &cvode_nsteps);
+  } else {
+      std::cerr << "Temporal scheme " << time_scheme << " not recognized." << std::endl;
+      throw(0);
+  }
 }
 
-void Solver::AdjustRHS(Ref<MatrixXd> RHS){
-    // Don't update V, T, or Y_k (these have wall BCs, the spray advection eqns do not)
-    RHS.row(0).head(2) = RowVectorXd::Zero(2);
-    RHS.row(0).tail(gas->nSpecies()) = RowVectorXd::Zero(gas->nSpecies());
-    // Don't update anything at inlet (we impose BCs for all variables here)
-    RHS.row(RHS.rows()-1) = RowVectorXd::Zero(RHS.cols());
-}
-
-double Solver::Getu(const Ref<const MatrixXd>& phi, int i){
+double Solver::Getu(const Ref<const MatrixXd>& Phi_, int i){
     if (i == 0){
         // no-slip wall
         return 0.0;
     } else {
         //TODO this can be made vastly more efficient by keeping track of the integral
-        VectorXd rho_vec = Getrho(phi.topRows(i + 1));
-        VectorXd V_vec = phi.col(0).head(i + 1);
+        VectorXd rho_vec = Getrho(Phi_.topRows(i + 1));
+        VectorXd V_vec = Phi_.col(0).head(i + 1);
         return -(2.0 / rho_vec(i)) * Quadrature(rho_vec.array() * V_vec.array(), dx.head(i));
     }
 }
@@ -793,53 +781,58 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
     return mdot_;
 }
 
-MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi){
+MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi_){
+  // Loop on BCs
+  SetBCs();
 
-    // initialize vectors and matrices
-    VectorXd u(VectorXd::Zero(N));
-    VectorXd rho_inv(VectorXd::Zero(N));
-    MatrixXd c(MatrixXd::Zero(N,M));
-    MatrixXd mu(MatrixXd::Zero(N,M));
-    MatrixXd omegadot(MatrixXd::Zero(N,M));
-    VectorXd mdot_liq(VectorXd::Zero(N));
-    MatrixXd Gammadot(MatrixXd::Zero(N,M));
+  // Create Phi = [wall_BC, phi, inlet_BC]^T
+  MatrixXd Phi(wall_BC.rows() + phi_.rows() + inlet_BC.rows(), phi_.cols());
+  Phi << wall_BC, phi_, inlet_BC;
 
-    for (int i = 0; i < N; i++){
-        u(i) = Getu(phi, i);
-        SetState(phi.row(i));
-        SetDerivedVars();
-        rho_inv(i) = 1.0/gas->density();
-        mdot_liq(i) = Getmdot_liq(phi.row(i));
-        for (int k = 0; k < M; k++){
-            c(i, k) = Getc(k);
-            mu(i, k) = Getmu(k);
-            omegadot(i, k) = Getomegadot(phi.row(i),k);
-            Gammadot(i,k) = GetGammadot(phi.row(i),k);
-        }
+  if (verbose)
+    std::cout << "Phi = " << std::endl << Phi << std::endl;
+
+  // initialize vectors and matrices
+  VectorXd u(VectorXd::Zero(N));
+  VectorXd rho_inv(VectorXd::Zero(N));
+  MatrixXd c(MatrixXd::Zero(N,M));
+  MatrixXd mu(MatrixXd::Zero(N,M));
+  MatrixXd omegadot(MatrixXd::Zero(N,M));
+  VectorXd mdot_liq(VectorXd::Zero(N));
+  MatrixXd Gammadot(MatrixXd::Zero(N,M));
+
+  for (int i = 0; i < N; i++){
+    u(i) = Getu(Phi, i+1);
+    SetState(Phi.row(i+1));
+    SetDerivedVars();
+    rho_inv(i) = 1.0/gas->density();
+    mdot_liq(i) = Getmdot_liq(Phi.row(i+1));
+    for (int k = 0; k < M; k++){
+      c(i, k) = Getc(k);
+      mu(i, k) = Getmu(k);
+      omegadot(i, k) = Getomegadot(Phi.row(i+1), k);
+      Gammadot(i,k) = GetGammadot(Phi.row(i+1), k);
     }
+  }
 
-    /*
-     * RHS          = conv + diff + src_gas + src_spray
-     * conv         = -u*ddx*phi
-     * diff         = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * phi))) (alternative)
-     * diff         = (diag(rho_inv)*c) .* (mu .* (d2dx2 * phi))
-     * src_gas      = (diag(rho_inv)*c) .* omegadot
-     * src_spray    = (diag(rho_inv)*c) .* (diag(mdot_liq) * Gammadot) (pure fuel)
-     */
-    MatrixXd conv = -1.0*u.asDiagonal() * (ddx * phi);
-    MatrixXd diff = (rho_inv.asDiagonal() * c).array() * (mu.array() * (d2dx2 * phi).array());
-    MatrixXd src_gas  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
-    MatrixXd src_spray = (rho_inv.asDiagonal() * c).array() * (mdot_liq.asDiagonal() * Gammadot).array();
+  /*
+   * RHS          = conv + diff + src_gas + src_spray
+   * conv         = -u*ddx*Phi
+   * diff         = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * Phi))) (alternative)
+   * diff         = (diag(rho_inv)*c) .* (mu .* (d2dx2 * Phi))
+   * src_gas      = (diag(rho_inv)*c) .* omegadot
+   * src_spray    = (diag(rho_inv)*c) .* (diag(mdot_liq) * Gammadot) (pure fuel)
+   */
+  MatrixXd conv = -1.0*u.asDiagonal() * (ddx * Phi);
+  MatrixXd diff = (rho_inv.asDiagonal() * c).array() * (mu.array() * (d2dx2 * Phi).array());
+  MatrixXd src_gas  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
+  MatrixXd src_spray = (rho_inv.asDiagonal() * c).array() * (mdot_liq.asDiagonal() * Gammadot).array();
 
-    MatrixXd out = conv + diff + src_gas + src_spray;
+  if (verbose)
+    std::cout << "RHS = " << std::endl << conv + diff + src_gas + src_spray << std::endl;
 
-    AdjustRHS(out);
-
-    // DEBUG
-    //std::cout << "RHS = " << std::endl << out << std::endl;
-    // TODO species don't work with CVODE. Maybe need to set HMAX?
-
-    return out;
+  // TODO species don't work with CVODE yet.
+  return conv + diff + src_gas + src_spray;
 }
 
 int Solver::RunSolver() {
@@ -849,11 +842,6 @@ int Solver::RunSolver() {
     time = 0.0;
     try {
         while(!CheckStop()){
-
-            // Loop on BCs
-            //inlet_bc.Update();
-            //wall_bc.Update();
-            UpdateBCs(); // non-polymorphic version for initial testing
 
             // Outputs
             if (!(iteration % output_interval)){
@@ -865,11 +853,7 @@ int Solver::RunSolver() {
             }
 
             // Integrate ODE
-            //integrator.Step();
-            StepIntegrator();// non-polymorphic version for initial testing
-
-            // TODO upgrade numerics so clipping isn't necessary for species
-            //Clipping();
+            StepIntegrator();
 
             // Update counters
             iteration++;

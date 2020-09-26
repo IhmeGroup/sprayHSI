@@ -27,22 +27,22 @@ public:
     void ReadParams(int argc, char* argv[]);
     void SetupSolver();
     void SetupGas();
+    void SetBCs();
     void DerivedParams();
     void ConstructMesh();
     void ConstructOperators();
     void SetIC();
     int RunSolver();
 
-  MatrixXd GetRHS(double time, const Ref<const MatrixXd>& phi);
+  MatrixXd GetRHS(double time, const Ref<const MatrixXd>& phi_);
 
 private:
     bool CheckStop();
     void Output();
     void StepIntegrator();
     void UpdateBCs();
-    void Clipping();
 
-    double Getu(const Ref<const MatrixXd>& phi, int i);
+  double Getu(const Ref<const MatrixXd>& Phi_, int i);
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
     VectorXd Getrho(const Ref<const MatrixXd>& phi);
     void SetState(const Ref<const RowVectorXd>& phi);
@@ -95,8 +95,8 @@ private:
         // Space
         VectorXd nodes;
         VectorXd dx;
-        int N;      // number of finite difference nodes (degrees of freedom)   [-]
-        double L;   // inlet-to-wall distance                                   [m]
+        int N;      // number of finite difference nodes (degrees of freedom), not including BCs   [-]
+        double L;   // inlet-to-wall distance                                                      [m]
 
         // Time
         double time;
@@ -145,11 +145,13 @@ private:
         double m_d_in;
         double rho_inf; // derived
         VectorXd Y_in; // derived
+        RowVectorXd inlet_BC;
 
         // Wall
         std::string wall_type;
         double T_wall;
         bool filming;
+        RowVectorXd wall_BC;
 
         // System
         double p_sys;
