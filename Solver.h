@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <chrono>
 #include "nvector/nvector_serial.h"
 #include "cantera/thermo.h"
 #include "cantera/kinetics.h"
@@ -66,6 +67,9 @@ private:
      * \\phi = [\V, \T, \Z_l, \m_d, \Y1, ..., \YN]
      */
     MatrixXd phi;
+
+    // Computational performance
+    double wall_time_per_output = 0.0;
 
     // IO
     bool verbose;

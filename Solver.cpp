@@ -540,6 +540,7 @@ void Solver::Output() {
     std::cout << "  Solver::Output()" << std::endl;
     std::cout << "  iteration = " << iteration << std::endl;
     std::cout << "  time = " << time << "[s]" << std::endl;
+    std::cout << "  wall-time-per-iteration = " << wall_time_per_output / output_interval << " [s]" << std::endl;
     if (time_scheme == "CVODE"){
       std::cout << "  ODE steps = " << cvode_nsteps << ", RHS evals = " << cvode_nRHSevals
         << ", Jac evals = " << cvode_nJacevals << ", last dt = " << cvode_last_dt << std::endl;
@@ -853,6 +854,7 @@ int Solver::RunSolver() {
             // Outputs
             if (!(iteration % output_interval)){
                 Output();
+                wall_time_per_output = 0.0;
                 if (verbose){
                     std::cout << "iteration = " << iteration << std::endl;
                     std::cout << "phi(t = " << time << ") = \n" << phi << std::endl;
@@ -860,12 +862,14 @@ int Solver::RunSolver() {
             }
 
             // Integrate ODE
+            std::chrono::time_point<std::chrono::system_clock> tic = std::chrono::system_clock::now();
             StepIntegrator();
+            std::chrono::duration<double> diff = std::chrono::system_clock::now() - tic;
+            wall_time_per_output += diff.count();
 
             // Update counters
             iteration++;
             time += dt;
-
         }
 
         return 0;
