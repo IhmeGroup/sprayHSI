@@ -74,6 +74,7 @@ void Solver::ReadParams(int argc, char* argv[]){
         if (time_scheme == "CVODE"){
           cvode_abstol = toml::find(Numerics_, "cvode_abstol").as_floating();
           cvode_reltol = toml::find(Numerics_, "cvode_reltol").as_floating();
+          cvode_maxsteps = toml::find(Numerics_, "cvode_maxsteps").as_integer();
         }
     }
 
@@ -188,6 +189,8 @@ void Solver::SetupSolver() {
     // 7. Set optional inputs
     p_rhs_functor = new RHSFunctor(N, M, this);
     CheckCVODE("CVodeSetUserData", CVodeSetUserData(cvode_mem, p_rhs_functor));
+    CheckCVODE("CVodeSetMaxStep", CVodeSetMaxStep(cvode_mem, dt));
+    CheckCVODE("CVodeSetMaxNumSteps", CVodeSetMaxNumSteps(cvode_mem, cvode_maxsteps));
 
     // 8. Attach linear solver module
     CheckCVODE("CVDense", CVDense(cvode_mem, cvode_N));
@@ -538,7 +541,8 @@ void Solver::Output() {
     std::cout << "  iteration = " << iteration << std::endl;
     std::cout << "  time = " << time << "[s]" << std::endl;
     if (time_scheme == "CVODE"){
-      std::cout << "  ODE steps = " << cvode_nsteps << std::endl;
+      std::cout << "  ODE steps = " << cvode_nsteps << ", RHS evals = " << cvode_nRHSevals
+        << ", Jac evals = " << cvode_nJacevals << ", last dt = " << cvode_last_dt << std::endl;
     }
 
     // Create Phi = [wall_BC, phi, inlet_BC]^T
@@ -592,6 +596,9 @@ void Solver::StepIntegrator() {
     CheckCVODE("CVode", CVode(cvode_mem, time + dt, cvode_y, &t_solver, CV_NORMAL));
     phi = Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M);
     CVodeGetNumSteps(cvode_mem, &cvode_nsteps);
+    CVodeGetNumRhsEvals(cvode_mem, &cvode_nRHSevals);
+    CVDlsGetNumJacEvals(cvode_mem, &cvode_nJacevals);
+    CVodeGetLastStep(cvode_mem, &cvode_last_dt);
   } else {
       std::cerr << "Temporal scheme " << time_scheme << " not recognized." << std::endl;
       throw(0);
