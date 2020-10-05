@@ -86,6 +86,7 @@ private:
 
     // Numerics
     std::string time_scheme;
+    int n_omp_threads = 1;
       // CVODE
       void* cvode_mem;
       long int cvode_N;

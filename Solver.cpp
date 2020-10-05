@@ -13,6 +13,7 @@
 #include "cvode/cvode_dense.h"
 #include "sundials/sundials_types.h"
 #include "RHSFunctor.h"
+#include "omp.h"
 
 Solver::Solver() {
     std::cout << "Solver::Solver()" << std::endl;
@@ -76,6 +77,7 @@ void Solver::ReadParams(int argc, char* argv[]){
           cvode_reltol = toml::find(Numerics_, "cvode_reltol").as_floating();
           cvode_maxsteps = toml::find(Numerics_, "cvode_maxsteps").as_integer();
         }
+        n_omp_threads = toml::find(Numerics_, "openMP_threads").as_integer();
     }
 
     // Gas
@@ -165,6 +167,9 @@ void Solver::ReadParams(int argc, char* argv[]){
 }
 
 void Solver::SetupSolver() {
+  std::cout << "Solver::SetupSolver()" << std::endl;
+  omp_set_num_threads(n_omp_threads);
+  std::cout << "  Eigen::nbThreads() = " << Eigen::nbThreads() << std::endl;
   if (time_scheme == "CVODE") {
     // Steps from Sec. 4.4 of CVODE User Guide (V2.7.0)
     double t0 = 0.0; // initial time
