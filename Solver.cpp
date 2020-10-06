@@ -78,6 +78,8 @@ void Solver::ReadParams(int argc, char* argv[]){
           cvode_maxsteps = toml::find(Numerics_, "cvode_maxsteps").as_integer();
         }
         n_omp_threads = toml::find(Numerics_, "openMP_threads").as_integer();
+        av_Zl = toml::find(Numerics_, "av_Zl").as_floating();
+        av_md = toml::find(Numerics_, "av_md").as_floating();
     }
 
     // Gas
@@ -242,14 +244,18 @@ void Solver::SetBCs() {
           // 1st order one-sided difference
           wall_BC(k) = phi(0,k);
         else
-          std::cerr << "unknown wall type and this should be polymorphic anyway" << std::endl;
+          throw(0);
         break;
-      // TODO ensure that this is mathematically correct for Z_l and m_d BCs
+      // TODO update Z_l and m_d BCs for filming/rebound
       // Z_l
       case 2:
+        // 1st order one-sided difference in case of AV
+        wall_BC(k) = phi(0,k);
         break;
       // m_d
       case 3:
+        // 1st order one-sided difference in case of AV
+        wall_BC(k) = phi(0,k);
         break;
       // Species
       default:
@@ -709,6 +715,25 @@ double Solver::Getmu(int k) {
     return mu;
 }
 
+double Solver::Getmu_av(int k) {
+  // Artificial viscosity
+  double mu_av;
+  switch (k){
+      // Z_l
+    case 2:
+      mu_av = av_Zl;
+      break;
+      // m_d
+    case 3:
+      mu_av = av_md;
+      break;
+      // Other quantities receive no artificial viscosity
+    default:
+      mu_av = 0.0;
+  }
+  return mu_av;
+}
+
 double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
     double omegadot_;
     switch (k){
@@ -793,18 +818,27 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
         // TODO single component fuel assumed!!!
         // TODO simple Heaviside function evaporation law assumed!!!
         if (T_ > T_l){
+          if (m_d_ > 0.0 && Z_l_ > 0.0){
             double A_ = 6.0/M_PI * m_d_/rho_l;
             // energy analogy mass transfer Spalding number
             double B_ = gas->cp_mass()*(T_ - T_l)/L_v;
             mdot_ = -2.0*M_PI*rho_*pow(A_,1.0/3.0)*mix_diff_coeffs(fuel_idx)*log(1.0 + B_);
+          } else {
+            mdot_ = 0.0;
+          }
         } else {
             mdot_ = 0.0;
         }
-        if (m_d_ + dt*mdot_ < 0.0 || mdot_ > 0.0){
-            //mdot_ = -m_d_/dt; // TODO this is correct to first order, may cause undershoots and WONT work for CVODE
-            mdot_ = 0.0; // TODO this is garbage, just to get this running
+        // The if-statement below is only useful for cases where dt is the only time step, not the outer time step
+//        if (m_d_ + dt*mdot_ < 0.0 || mdot_ > 0.0){
+//            //mdot_ = -m_d_/dt; // this is correct to first order, may cause undershoots and WONT work for CVODE
+//            mdot_ = 0.0; // this is garbage, just to get this running
+//        }
+
+        // Guard against condensation
+        if (mdot_ > 0.0){
+          mdot_ = 0.0;
         }
-            return mdot_;
     } else {
         mdot_ = 0.0;
     }
@@ -829,6 +863,7 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
   VectorXd rho_inv(VectorXd::Zero(N));
   MatrixXd c(MatrixXd::Zero(N,M));
   MatrixXd mu(MatrixXd::Zero(N,M));
+  MatrixXd mu_av(MatrixXd::Zero(N,M));
   MatrixXd omegadot(MatrixXd::Zero(N,M));
   VectorXd mdot_liq(VectorXd::Zero(N));
   MatrixXd Gammadot(MatrixXd::Zero(N,M));
@@ -842,28 +877,30 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
     for (int k = 0; k < M; k++){
       c(i, k) = Getc(k);
       mu(i, k) = Getmu(k);
+      mu_av(i, k) = Getmu_av(k);
       omegadot(i, k) = Getomegadot(Phi.row(i+1), k);
       Gammadot(i,k) = GetGammadot(Phi.row(i+1), k);
     }
   }
 
+  // TODO make AV smarter to only activate on strong gradients
+
   /*
-   * RHS          = conv + diff + src_gas + src_spray
-   * conv         = -u*ddx*Phi
-   * diff         = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * Phi))) (alternative)
-   * diff         = (diag(rho_inv)*c) .* (mu .* (d2dx2 * Phi))
-   * src_gas      = (diag(rho_inv)*c) .* omegadot
-   * src_spray    = (diag(rho_inv)*c) .* (diag(mdot_liq) * Gammadot) (pure fuel)
+   * RHS          = conv + diff + src_gas + src_spray                              (residual definition)
+   * conv         = -u*ddx*Phi                                                     (convection)
+   * diff         = (diag(rho_inv)*c) .* ((mu + mu_av) .* (d2dx2 * Phi))           (diffusion, as implemented)
+   * diff         = (diag(rho_inv)*c) .* (ddx * (mu .* (ddx * Phi)))               (diffusion, alternative)
+   * src_gas      = (diag(rho_inv)*c) .* omegadot                                  (gas source)
+   * src_spray    = (diag(rho_inv)*c) .* (diag(mdot_liq) * Gammadot)               (spray source, pure fuels only)
    */
   MatrixXd conv = -1.0*u.asDiagonal() * (ddx * Phi);
-  MatrixXd diff = (rho_inv.asDiagonal() * c).array() * (mu.array() * (d2dx2 * Phi).array());
+  MatrixXd diff = (rho_inv.asDiagonal() * c).array() * ((mu + mu_av).array() * (d2dx2 * Phi).array());
   MatrixXd src_gas  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
   MatrixXd src_spray = (rho_inv.asDiagonal() * c).array() * (mdot_liq.asDiagonal() * Gammadot).array();
 
   if (verbose)
     std::cout << "RHS = " << std::endl << conv + diff + src_gas + src_spray << std::endl;
 
-  // TODO species don't work with CVODE yet.
   return conv + diff + src_gas + src_spray;
 }
 

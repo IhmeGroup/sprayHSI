@@ -43,12 +43,13 @@ private:
     void StepIntegrator();
     void UpdateBCs();
 
-  double Getu(const Ref<const MatrixXd>& Phi_, int i);
+    double Getu(const Ref<const MatrixXd>& Phi_, int i);
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
     VectorXd Getrho(const Ref<const MatrixXd>& phi);
     void SetState(const Ref<const RowVectorXd>& phi);
     double Getc(int k);
     double Getmu(int k);
+    double Getmu_av(int k);
     double Getomegadot(const Ref<const RowVectorXd>& phi_, int k);
     double GetGammadot(const Ref<const RowVectorXd>& phi_, int k);
     double Getmdot_liq(const Ref<const RowVectorXd>& phi_);
@@ -87,6 +88,8 @@ private:
     // Numerics
     std::string time_scheme;
     int n_omp_threads = 1;
+    double av_Zl = 0.0;
+    double av_md = 0.0;
       // CVODE
       void* cvode_mem;
       long int cvode_N;
