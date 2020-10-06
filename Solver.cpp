@@ -559,10 +559,29 @@ void Solver::Output() {
     MatrixXd Phi(wall_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
     Phi << wall_BC, phi, inlet_BC;
 
-    int width_ = 10;
-    std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "V [1/s]" << std::setw(width_) << "T [K]" <<'\n';
+    // Derived quantities
+    VectorXd rho_ = Getrho(Phi);
+    VectorXd u_(VectorXd::Zero(N+2));
     for (int i = 0; i < N+2; i++){
-        std::cout << std::left << std::setw(width_) << i << std::setw(width_) << nodes(i) << std::setw(width_) << Phi(i,0) << std::setw(width_) << Phi(i,1) << std::endl;
+      u_(i) = Getu(Phi,i);
+    }
+
+    int width_ = 14;
+    std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
+      << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
+      << std::setw(width_) << "T [K]" << std::setw(width_) << "Z_l" << std::setw(width_) << "m_d" << std::setw(width_)
+      << "Y_f" << std::setw(width_) << std::endl;
+    for (int i = 0; i < N+2; i++){
+      std::cout << std::left << std::setw(width_) << i; // i
+      std::cout << std::left << std::setw(width_) << nodes(i); // x
+      std::cout << std::left << std::setw(width_) << u_(i); // u
+      std::cout << std::left << std::setw(width_) << rho_(i); // rho
+      std::cout << std::left << std::setw(width_) << Phi(i,0); // V
+      std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,1); // T
+      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,2); // Z_l
+      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,3); // m_d
+      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,m+fuel_idx); // Y_f
+      std::cout << std::endl;
     }
 
     // File output
@@ -571,11 +590,6 @@ void Solver::Output() {
     if (output_file.is_open()){
         std::cout << "Writing " << output_name_ << std::endl;
         output_file << output_header << std::endl;
-        VectorXd rho_ = Getrho(Phi);
-        VectorXd u_(VectorXd::Zero(N+2));
-        for (int i = 0; i < N+2; i++){
-            u_(i) = Getu(Phi,i);
-        }
         MatrixXd outmat_(N+2, M + 3); // X u_ rho_ phi
         outmat_ << nodes, u_, rho_, Phi;
         output_file << outmat_ << std::endl;
@@ -786,10 +800,9 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
         } else {
             mdot_ = 0.0;
         }
-        // TODO for Getmdot_liq, this is time stepping scheme dependent, and doesn't account for transport!!! Must think of a better way!!!
         if (m_d_ + dt*mdot_ < 0.0 || mdot_ > 0.0){
-            //mdot_ = m_d_/dt + 1.0e-300;
-            mdot_ = 0.0; // this is garbage, just a hack to get it running
+            //mdot_ = -m_d_/dt; // TODO this is correct to first order, may cause undershoots and WONT work for CVODE
+            mdot_ = 0.0; // TODO this is garbage, just to get this running
         }
             return mdot_;
     } else {
@@ -798,7 +811,7 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
     return mdot_;
 }
 
-MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi_){
+MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
   // Loop on BCs
   SetBCs();
 
@@ -806,8 +819,10 @@ MatrixXd Solver::GetRHS(double time, const Ref<const MatrixXd>& phi_){
   MatrixXd Phi(wall_BC.rows() + phi_.rows() + inlet_BC.rows(), phi_.cols());
   Phi << wall_BC, phi_, inlet_BC;
 
-  if (verbose)
-    std::cout << "Phi = " << std::endl << Phi << std::endl;
+  if (verbose) {
+    std::cout << "GetRHS(t = " << time_ << ", phi)" << std::endl;
+    std::cout << "  Phi = " << std::endl << Phi << std::endl;
+  }
 
   // initialize vectors and matrices
   VectorXd u(VectorXd::Zero(N));

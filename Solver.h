@@ -35,7 +35,7 @@ public:
     void SetIC();
     int RunSolver();
 
-  MatrixXd GetRHS(double time, const Ref<const MatrixXd>& phi_);
+  MatrixXd GetRHS(double time_, const Ref<const MatrixXd>& phi_);
 
 private:
     bool CheckStop();
