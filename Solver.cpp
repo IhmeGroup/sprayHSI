@@ -502,7 +502,11 @@ void Solver::SetIC() {
             // T
             case 1:
                 if (IC_type == "linear_T"){
-                    phi.col(k) = VectorXd::LinSpaced(N,T_wall,T_in); //TODO this needs to be fixed to avoid 'step' at BCs
+                  double T_ = T_wall;
+                  for (int i = 0; i < N; i++){
+                    T_ += (T_in - T_wall)/L * dx[i];
+                    phi(i,k) = T_;
+                  }
                 } else if (IC_type == "constant_T"){
                     phi.col(k) = Tgas_0*VectorXd::Constant(N,1.0);
                 } else {
