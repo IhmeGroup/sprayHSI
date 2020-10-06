@@ -7,6 +7,8 @@
 
 #include <string>
 #include <vector>
+#include <chrono>
+#include "nvector/nvector_serial.h"
 #include "cantera/thermo.h"
 #include "cantera/kinetics.h"
 #include "cantera/transport.h"
@@ -15,6 +17,8 @@
 using namespace Eigen;
 using namespace Cantera;
 
+class RHSFunctor;
+
 class Solver {
 
 public:
@@ -22,21 +26,24 @@ public:
     ~Solver();
 
     void ReadParams(int argc, char* argv[]);
+    void SetupSolver();
     void SetupGas();
+    void SetBCs();
     void DerivedParams();
     void ConstructMesh();
     void ConstructOperators();
     void SetIC();
     int RunSolver();
 
+  MatrixXd GetRHS(double time, const Ref<const MatrixXd>& phi_);
+
 private:
     bool CheckStop();
     void Output();
     void StepIntegrator();
     void UpdateBCs();
-    void Clipping();
-    MatrixXd GetRHS(double time, const Ref<const MatrixXd>& phi);
-    double Getu(const Ref<const MatrixXd>& phi, int i);
+
+  double Getu(const Ref<const MatrixXd>& Phi_, int i);
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
     VectorXd Getrho(const Ref<const MatrixXd>& phi);
     void SetState(const Ref<const RowVectorXd>& phi);
@@ -50,6 +57,9 @@ private:
     int GetSpeciesIndex(std::string cantera_string);
     void AdjustRHS(Ref<MatrixXd> RHS);
     void SetDerivedVars();
+    void CheckCVODE(std::string func_name, int flag);
+
+    static int cvode_RHS(double t, N_Vector y, N_Vector ydot, void *f_data);
 
     /*
      * Solution tensor \\phi, NxM
@@ -57,6 +67,9 @@ private:
      * \\phi = [\V, \T, \Z_l, \m_d, \Y1, ..., \YN]
      */
     MatrixXd phi;
+
+    // Computational performance
+    double wall_time_per_output = 0.0;
 
     // IO
     bool verbose;
@@ -73,13 +86,26 @@ private:
 
     // Numerics
     std::string time_scheme;
+    int n_omp_threads = 1;
+      // CVODE
+      void* cvode_mem;
+      long int cvode_N;
+      long int cvode_nsteps = 0;
+      long int cvode_nRHSevals = 0;
+      long int cvode_nJacevals = 0;
+      double cvode_last_dt = 0;
+      double cvode_abstol;
+      double cvode_reltol;
+      long int cvode_maxsteps;
+      N_Vector cvode_y;
+      RHSFunctor* p_rhs_functor;
 
-    // Mesh
+  // Mesh
         // Space
         VectorXd nodes;
         VectorXd dx;
-        int N;      // number of finite difference nodes (degrees of freedom)   [-]
-        double L;   // inlet-to-wall distance                                   [m]
+        int N;      // number of finite difference nodes (degrees of freedom), not including BCs   [-]
+        double L;   // inlet-to-wall distance                                                      [m]
 
         // Time
         double time;
@@ -128,11 +154,13 @@ private:
         double m_d_in;
         double rho_inf; // derived
         VectorXd Y_in; // derived
+        RowVectorXd inlet_BC;
 
         // Wall
         std::string wall_type;
         double T_wall;
         bool filming;
+        RowVectorXd wall_BC;
 
         // System
         double p_sys;

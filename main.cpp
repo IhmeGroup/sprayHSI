@@ -31,6 +31,9 @@ int main(int argc, char* argv[]) {
     // Set IC
     spray_solver.SetIC();
 
+    // Setup solver
+    spray_solver.SetupSolver();
+
     // Run solver
     if (spray_solver.RunSolver())
         std::cerr << "spray_solver.RunSolver() failed!" << std::endl;
