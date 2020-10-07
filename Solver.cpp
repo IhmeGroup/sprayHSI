@@ -221,10 +221,6 @@ void Solver::SetupGas() {
 
     // Kinetics
     if (mech_qss){
-//      gas_qss = newPhase(mech_file, "QSS");
-//      std::vector<ThermoPhase *> phases_{gas, gas_qss};
-//      kin = newKineticsMgr(gas->xml(), phases_);
-
       gas_qss = newPhase(mech_file, "QSS");
       std::vector<ThermoPhase *> phases_{gas, gas_qss};
 
