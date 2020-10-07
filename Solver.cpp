@@ -46,6 +46,7 @@ void Solver::ReadParams(int argc, char* argv[]){
         verbose = toml::find(IO_, "verbose").as_boolean();
         output_interval = toml::find(IO_, "output_interval").as_integer();
         output_path = toml::find(IO_, "output_path").as_string();
+        output_species = toml::get<std::vector<std::string>>(toml::find(IO_, "output_species"));
     }
 
     // Mesh
@@ -572,11 +573,15 @@ void Solver::Output() {
       u_(i) = Getu(Phi,i);
     }
 
+    // Standard output
     int width_ = 14;
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
-      << std::setw(width_) << "T [K]" << std::setw(width_) << "Z_l" << std::setw(width_) << "m_d" << std::setw(width_)
-      << "Y_f" << std::setw(width_) << std::endl;
+      << std::setw(width_) << "T [K]" << std::setw(width_) << "Z_l" << std::setw(width_) << "m_d" << std::setw(width_);
+    for (const auto& s : output_species){
+      std::cout << std::left << std::setw(width_) << "Y_" + s;
+    }
+    std::cout << std::endl;
     for (int i = 0; i < N+2; i++){
       std::cout << std::left << std::setw(width_) << i; // i
       std::cout << std::left << std::setw(width_) << nodes(i); // x
@@ -586,7 +591,9 @@ void Solver::Output() {
       std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,1); // T
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,2); // Z_l
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,3); // m_d
-      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,m+fuel_idx); // Y_f
+      for (const auto& s : output_species){
+        std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,m + GetSpeciesIndex(s)); // Y
+      }
       std::cout << std::endl;
     }
 

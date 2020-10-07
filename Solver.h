@@ -80,6 +80,7 @@ private:
     int output_interval; //TODO could add an output interval in time as well
     std::string output_path;
     std::string output_header;
+    std::vector<std::string> output_species;
 
     // Physics
     int M;      // number of variables per node (dimensionality)            [-]
