@@ -43,6 +43,6 @@ int main(int argc, char* argv[]) {
     std::chrono::duration<double> elapsed_seconds = end - start;
     std::cout << "Elapsed time: " << elapsed_seconds.count()*1000.0 << "ms" << std::endl;
 
-    // Done
+    // Done.
     return 0;
 }
