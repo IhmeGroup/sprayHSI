@@ -11,6 +11,7 @@
 #include "nvector/nvector_serial.h"
 #include "cantera/thermo.h"
 #include "cantera/kinetics.h"
+#include "cantera/kinetics/GasQSSKinetics.h"
 #include "cantera/transport.h"
 #include "Eigen/Dense"
 
@@ -123,8 +124,10 @@ private:
 
     // Gas
     std::string mech_file;
-    std::string mech_type;
+    std::string phase_name;
+    bool mech_qss = false;
     ThermoPhase* gas;
+    ThermoPhase* gas_qss;
     Kinetics* kin;
     VectorXd omega_dot_mol;
     VectorXd species_enthalpies_mol;

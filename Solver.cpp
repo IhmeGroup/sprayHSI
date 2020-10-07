@@ -87,7 +87,8 @@ void Solver::ReadParams(int argc, char* argv[]){
     {
         const auto Gas_ = toml::find(data, "Gas");
         mech_file = toml::find(Gas_, "mech_file").as_string();
-        mech_type = toml::find(Gas_, "mech_type").as_string();
+        phase_name = toml::find(Gas_, "phase_name").as_string();
+        mech_qss = toml::find(Gas_, "qss").as_boolean();
         reacting = toml::find(Gas_, "reacting").as_boolean();
     }
 
@@ -215,9 +216,27 @@ void Solver::CheckCVODE(std::string func_name, int flag) {
 void Solver::SetupGas() {
     std::cout << "Solver::SetupGas()" << std::endl;
 
-    gas = newPhase(mech_file,mech_type);
-    std::vector<ThermoPhase*> phases_ {gas};
-    kin = newKineticsMgr(gas->xml(),phases_);
+    // Gas object
+    gas = newPhase(mech_file, phase_name);
+
+    // Kinetics
+    if (mech_qss){
+//      gas_qss = newPhase(mech_file, "QSS");
+//      std::vector<ThermoPhase *> phases_{gas, gas_qss};
+//      kin = newKineticsMgr(gas->xml(), phases_);
+
+      gas_qss = newPhase(mech_file, "QSS");
+      std::vector<ThermoPhase *> phases_{gas, gas_qss};
+
+      kin = new GasQSSKinetics();
+      importKinetics(gas_qss->xml(), phases_, kin);
+
+    } else {
+      std::vector<ThermoPhase *> phases_{gas};
+      kin = newKineticsMgr(gas->xml(), phases_);
+    }
+
+    // Transport properties
     trans = newDefaultTransportMgr(gas);
 
     M = m + gas->nSpecies();
