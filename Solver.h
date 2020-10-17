@@ -111,6 +111,8 @@ private:
         VectorXd dx;
         int N;      // number of finite difference nodes (degrees of freedom), not including BCs   [-]
         double L;   // inlet-to-wall distance                                                      [m]
+        std::string spacing; // spacing scheme
+        double spacing_D0; // wall spacing (first dx) for geometric spacing
 
         // Time
         double time;

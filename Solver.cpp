@@ -56,6 +56,10 @@ void Solver::ReadParams(int argc, char* argv[]){
         // Space
         N = toml::find(Mesh_, "Space", "N").as_integer();
         L = toml::find(Mesh_, "Space", "L").as_floating();
+        spacing = toml::find(Mesh_, "Space", "spacing").as_string();
+        if (spacing == "geometric"){
+          spacing_D0 = toml::find(Mesh_, "Space", "wall_spacing").as_floating();
+        }
 
         // Time
         time_max = toml::find(Mesh_, "Time", "time_max").as_floating();
@@ -438,9 +442,17 @@ void Solver::ConstructMesh() {
     dx = VectorXd::Zero(N+1);
     nodes = VectorXd::Zero(N+2);
 
-    // constant spacing for now, but this could be specified from input (e.g. log spacing)
-    double dx_ = L/(N+1);
-    dx = dx_*VectorXd::Constant(N+1,1.0);
+    if (spacing == "constant"){
+      double dx_ = L/(N+1);
+      dx = dx_*VectorXd::Constant(N+1,1.0);
+    } else if (spacing == "geometric"){
+      dx(0) = spacing_D0;
+      double r_ = pow((L/spacing_D0),(1.0/N));
+      for (int i=1; i<N+1; i++){
+        dx(i) = pow(r_, i-1) * (r_ - 1.0) * (0.0 + spacing_D0);
+      }
+      std::cout << "  Max spacing: " << dx(N)*1000.0 << "mm" << std::endl;
+    }
 
     // loop over node vector and fill according to spacing vector
     nodes(0) = 0.0;
