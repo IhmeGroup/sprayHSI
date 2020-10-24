@@ -95,6 +95,8 @@ void Solver::ReadParams(int argc, char* argv[]){
         phase_name = toml::find(Gas_, "phase_name").as_string();
         mech_qss = toml::find(Gas_, "qss").as_boolean();
         reacting = toml::find(Gas_, "reacting").as_boolean();
+        X_ox = toml::find(Gas_, "oxidizer").as_string();
+        X_f = toml::find(Gas_, "fuel").as_string();
     }
 
     // Spray
@@ -337,7 +339,7 @@ void Solver::DerivedParams() {
 
     // Header for output files
     output_header = "TITLE = \"" + input_name + "\"";
-    output_header += "\nVARIABLES = \"X\", \"u\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
+    output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
     for (int i = 0; i < gas->nSpecies(); i++){
         output_header += " \"Y_" + gas->speciesName(i) + "\"";
         if (i != gas->nSpecies() - 1) output_header += ",";
@@ -598,15 +600,18 @@ void Solver::Output() {
     // Derived quantities
     VectorXd rho_ = Getrho(Phi);
     VectorXd u_(VectorXd::Zero(N+2));
+    VectorXd ZBilger_(VectorXd::Zero(N+2));
     for (int i = 0; i < N+2; i++){
       u_(i) = Getu(Phi,i);
+      ZBilger_(i) = GetZBilger(Phi,i);
     }
 
     // Standard output
     int width_ = 14;
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
-      << std::setw(width_) << "T [K]" << std::setw(width_) << "Z_l" << std::setw(width_) << "m_d" << std::setw(width_);
+      << std::setw(width_) << "T [K]" << std::setw(width_) << "ZBilger" << std::setw(width_) << "Z_l" << std::setw(width_)
+      << "m_d" << std::setw(width_);
     for (const auto& s : output_species){
       std::cout << std::left << std::setw(width_) << "Y_" + s;
     }
@@ -618,6 +623,7 @@ void Solver::Output() {
       std::cout << std::left << std::setw(width_) << rho_(i); // rho
       std::cout << std::left << std::setw(width_) << Phi(i,0); // V
       std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,1); // T
+      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << ZBilger_(i); // ZBilger
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,2); // Z_l
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,3); // m_d
       for (const auto& s : output_species){
@@ -632,8 +638,8 @@ void Solver::Output() {
     if (output_file.is_open()){
         std::cout << "Writing " << output_name_ << std::endl;
         output_file << output_header << std::endl;
-        MatrixXd outmat_(N+2, M + 3); // X u_ rho_ phi
-        outmat_ << nodes, u_, rho_, Phi;
+        MatrixXd outmat_(N+2, M + 4); // X u_ ZBilger_ rho_ phi
+        outmat_ << nodes, u_, ZBilger_, rho_, Phi;
         output_file << outmat_ << std::endl;
         output_file.close();
     } else {
@@ -681,6 +687,44 @@ double Solver::Getu(const Ref<const MatrixXd>& Phi_, int i){
         VectorXd V_vec = Phi_.col(0).head(i + 1);
         return -(2.0 / rho_vec(i)) * Quadrature(rho_vec.array() * V_vec.array(), dx.head(i));
     }
+}
+
+double Solver::GetZBilger(const Ref<const MatrixXd>& Phi_, int i){
+  // This function is mostly from CharlesX, PhysicsDeriveFunctor.h, Hao Wu 2017.
+
+  /**
+     *             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H + (Y_O - Yo_O)/W_O
+     * ZBilger =  -----------------------------------------------------------
+     *            2(Yf_C - Yo_C)/W_C + (Yf_H - Yo_H)/2W_H + (Yf_O - Yo_O)/W_O
+     */
+
+  size_t i_C = gas->elementIndex("C");
+  size_t i_H = gas->elementIndex("H");
+  size_t i_O = gas->elementIndex("O");
+
+  double W_C = gas->atomicWeight(i_C);
+  double W_H = gas->atomicWeight(i_H);
+  double W_O = gas->atomicWeight(i_O);
+
+  gas->setMoleFractionsByName(X_ox);
+  double Yo_C = gas->elementalMassFraction(i_C);
+  double Yo_H = gas->elementalMassFraction(i_H);
+  double Yo_O = gas->elementalMassFraction(i_O);
+
+  gas->setMoleFractionsByName(X_f);
+  double Yf_C = gas->elementalMassFraction(i_C);
+  double Yf_H = gas->elementalMassFraction(i_H);
+  double Yf_O = gas->elementalMassFraction(i_O);
+
+  double denom_ = 2.0 * (Yf_C - Yo_C) / W_C
+                    + 0.5 * (Yf_H - Yo_H) / W_H
+                    + (Yf_O - Yo_O) / W_O;
+
+  SetState(Phi_.row(i));
+  double num_   = 2.0 * (gas->elementalMassFraction(i_C) - Yo_C) / W_C
+                  + 0.5 * (gas->elementalMassFraction(i_H) - Yo_H) / W_H
+                  + (gas->elementalMassFraction(i_O) - Yo_O) / W_O;
+  return num_/denom_;
 }
 
 double Solver::Quadrature(const Ref<const VectorXd>& f_, const Ref<const VectorXd>& dx_){

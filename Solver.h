@@ -45,6 +45,7 @@ private:
     void UpdateBCs();
 
     double Getu(const Ref<const MatrixXd>& Phi_, int i);
+    double GetZBilger(const Ref<const MatrixXd>& Phi_, int i);
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
     VectorXd Getrho(const Ref<const MatrixXd>& phi);
     void SetState(const Ref<const RowVectorXd>& phi);
@@ -105,7 +106,7 @@ private:
       N_Vector cvode_y;
       RHSFunctor* p_rhs_functor;
 
-  // Mesh
+    // Mesh
         // Space
         VectorXd nodes;
         VectorXd dx;
@@ -136,6 +137,8 @@ private:
     bool reacting;
     Transport* trans;
     VectorXd mix_diff_coeffs;
+    std::string X_ox; // oxidizer and fuel mass fractions for ZBilger
+    std::string X_f;
 
     // Spray
     std::string X_liq;
