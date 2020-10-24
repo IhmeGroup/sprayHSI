@@ -13,6 +13,7 @@
 #include "cvode/cvode_dense.h"
 #include "sundials/sundials_types.h"
 #include "RHSFunctor.h"
+#include "Meshing.h"
 #include "omp.h"
 
 Solver::Solver() {
@@ -56,6 +57,10 @@ void Solver::ReadParams(int argc, char* argv[]){
         // Space
         N = toml::find(Mesh_, "Space", "N").as_integer();
         L = toml::find(Mesh_, "Space", "L").as_floating();
+        spacing = toml::find(Mesh_, "Space", "spacing").as_string();
+        if (spacing == "geometric"){
+          spacing_D0 = toml::find(Mesh_, "Space", "wall_spacing").as_floating();
+        }
 
         // Time
         time_max = toml::find(Mesh_, "Time", "time_max").as_floating();
@@ -438,9 +443,18 @@ void Solver::ConstructMesh() {
     dx = VectorXd::Zero(N+1);
     nodes = VectorXd::Zero(N+2);
 
-    // constant spacing for now, but this could be specified from input (e.g. log spacing)
-    double dx_ = L/(N+1);
-    dx = dx_*VectorXd::Constant(N+1,1.0);
+    if (spacing == "constant"){
+      double dx_ = L/(N+1);
+      dx = dx_*VectorXd::Constant(N+1,1.0);
+    } else if (spacing == "geometric"){
+      dx(0) = spacing_D0;
+      double r_ = GetGeometricRatio<double>(N+1,L,spacing_D0);
+      std::cout << "  Ratio: " << r_ << std::endl;
+      for (int i=1; i<N+1; i++){
+        dx(i) = pow(r_, i) * spacing_D0;
+      }
+      std::cout << "  Max spacing: " << dx(N)*1000.0 << "mm" << std::endl;
+    }
 
     // loop over node vector and fill according to spacing vector
     nodes(0) = 0.0;
@@ -470,6 +484,7 @@ void Solver::ConstructOperators() {
 
     // ddx
     // 1st-order 'upwinded' (but downwinded on the grid because convection is always in -ve x direction)
+    // generalized to non-uniform grids
 
     // resize matrix
     ddx = MatrixXd::Zero(N,N+2);
@@ -478,15 +493,15 @@ void Solver::ConstructOperators() {
     for (int i = 0; i < N; i++){
         for (int j = 0; j < N+2; j++){
             if (i+1 == j){
-                ddx(i,j)   = -1.0/dx[i+1];
-                ddx(i,j+1) =  1.0/dx[i+1];
+                ddx(i,j)   = -1.0/dx(i+1);
+                ddx(i,j+1) =  1.0/dx(i+1);
             }
         }
     }
 
     // d2dx2
     // 2nd-order central
-    //TODO this is only 2nd-order for uniform grids! must include extra terms for non-uniform or else 0th order!!
+    // generalized to non-uniform grids
 
     // resize matrix
     d2dx2 = MatrixXd::Zero(N,N+2);
@@ -495,10 +510,9 @@ void Solver::ConstructOperators() {
     for (int i = 0; i < N; i++){
         for (int j = 0; j < N+2; j++){
             if (i+1 == j){
-                double dx2_ = (pow(dx(i),2) + pow(dx(i+1),2))/2.0;
-                d2dx2(i,j-1) =  1.0/dx2_;
-                d2dx2(i,j)   = -2.0/dx2_;
-                d2dx2(i,j+1) =  1.0/dx2_;
+                d2dx2(i,j-1) =  2.0/(dx(i) * (dx(i) + dx(i+1)));
+                d2dx2(i,j)   = -2.0/(dx(i)*dx(i+1));
+                d2dx2(i,j+1) =  2.0/(dx(i) * (dx(i) + dx(i+1)));
             }
         }
     }
