@@ -175,6 +175,52 @@ void Solver::ReadParams(int argc, char* argv[]){
             Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
             m_d_0 = toml::find(Spray_, "m_d").as_floating();
     }
+
+    // Override input file using command line
+    // Consider the following variables:
+    // N, L, T_in, X_in, mdot, Z_l_in, m_d_in, T_wall, p_sys, X_0
+    for (int i = 0; i < argc; i++){
+      if (std::strcmp(argv[i],"-N") == 0){
+        N = atoi(argv[i+1]);
+        std::cout << "  N overriden via command line to " << N << std::endl;
+      }
+      if (std::strcmp(argv[i],"-L") == 0){
+        L = atof(argv[i+1]);
+        std::cout << "  L overriden via command line to " << L << std::endl;
+      }
+      if (std::strcmp(argv[i],"-T_in") == 0){
+        T_in = atof(argv[i+1]);
+        std::cout << "  T_in overriden via command line to " << T_in << std::endl;
+      }
+      if (std::strcmp(argv[i],"-X_in") == 0){
+        X_in = argv[i+1];
+        std::cout << "  X_in overriden via command line to " << X_in << std::endl;
+      }
+      if (std::strcmp(argv[i],"-mdot") == 0){
+        mdot = atof(argv[i+1]);
+        std::cout << "  mdot overriden via command line to " << mdot << std::endl;
+      }
+      if (std::strcmp(argv[i],"-Z_l_in") == 0){
+        Z_l_in = atof(argv[i+1]);
+        std::cout << "  Z_l_in overriden via command line to " << Z_l_in << std::endl;
+      }
+      if (std::strcmp(argv[i],"-m_d_in") == 0){
+        m_d_in = atof(argv[i+1]);
+        std::cout << "  m_d_in overriden via command line to " << m_d_in << std::endl;
+      }
+      if (std::strcmp(argv[i],"-T_wall") == 0){
+        T_wall = atof(argv[i+1]);
+        std::cout << "  T_wall overriden via command line to " << T_wall << std::endl;
+      }
+      if (std::strcmp(argv[i],"-p_sys") == 0){
+        p_sys = atof(argv[i+1]);
+        std::cout << "  p_sys overriden via command line to " << p_sys << std::endl;
+      }
+      if (std::strcmp(argv[i],"-X_0") == 0){
+        X_0 = argv[i+1];
+        std::cout << "  X_0 overriden via command line to " << X_0 << std::endl;
+      }
+    }
 }
 
 void Solver::SetupSolver() {
