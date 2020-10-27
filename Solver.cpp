@@ -192,6 +192,10 @@ void Solver::ReadParams(int argc, char* argv[]){
     // Consider the following variables:
     // N, L, T_in, X_in, mdot, Z_l_in, m_d_in, T_wall, p_sys, X_0
     for (int i = 0; i < argc; i++){
+      if (std::strcmp(argv[i],"-row_index") == 0){
+        row_index = atoi(argv[i+1]);
+        std::cout << "  row_index is " << row_index << std::endl;
+      }
       if (std::strcmp(argv[i],"-N") == 0){
         N = atoi(argv[i+1]);
         std::cout << "  N overriden via command line to " << N << std::endl;
@@ -232,6 +236,10 @@ void Solver::ReadParams(int argc, char* argv[]){
         X_0 = argv[i+1];
         std::cout << "  X_0 overriden via command line to " << X_0 << std::endl;
       }
+    }
+    if (run_mode == "ignition" && row_index < 0){
+      std::cerr << "Doing an ignition parameter study, but row_index not provided. Please set with -row_index" << std::endl;
+      throw(0);
     }
 }
 
@@ -404,7 +412,7 @@ void Solver::DerivedParams() {
     }
     output_header += "\nZONE I=" + std::to_string(N) + ", F=POINT";
 
-    ign_header = "iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from order in which program&params were called in Python.
+    ign_header = "row_index,iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from row_index and order in which program&params were called in Python.
     for (const auto& s : output_species){
       ign_header += ",Y_" + s;
     }
@@ -640,13 +648,13 @@ void Solver::SetIC() {
 bool Solver::CheckIgnited() {
   bool ignited_ = false;
   if (ign_cond == "T_max") {
-    ignited_ = (phi.col(1).maxCoeff() > T_max);
+    ignited = (phi.col(1).maxCoeff() > T_max);
   }
 
-  if (ignited_){
+  if (ignited){
     std::cout << " ---------------- Ignition ---------------- " << std::endl;
   }
-  return ignited_;
+  return ignited;
 }
 
 bool Solver::CheckStop() {
@@ -708,7 +716,11 @@ void Solver::Output() {
     }
 
     // File output
-    std::string output_name_ = input_name + "_" + std::to_string(iteration) + ".dat";
+    std::string output_name_;
+    if (ignited && run_mode == "ignition")
+      output_name_ = input_name + "_" + "ign_row_" + std::to_string(row_index) + ".dat";
+    else
+       output_name_ = input_name + "_" + std::to_string(iteration) + ".dat";
     std::ofstream output_file(output_path + output_name_);
     if (output_file.is_open()){
         std::cout << "Writing " << output_name_ << std::endl;
@@ -749,8 +761,9 @@ void Solver::OutputIgnition() {
   std::ofstream ign_file_(ign_file_path_, std::ios_base::app);
   if (ign_file_.is_open()){
     std::cout << "Writing to ignition_data.csv" << std::endl;
-    //iteration,time, and x,dx_avg,u,ZBilger,rho,V,T,Zl,md,Y_k @ ignition location, ignition time
+    //row_index,iteration,time, and x,dx_avg,u,ZBilger,rho,V,T,Zl,md,Y_k @ ignition location, ignition time
     ign_file_ <<
+    row_index << "," <<
     iteration << "," <<
     time << "," <<
     x_ign_ << "," <<

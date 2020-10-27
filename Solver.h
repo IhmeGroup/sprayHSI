@@ -86,6 +86,7 @@ private:
     std::string output_header;
     std::string ign_header; // header for ignition file
     std::vector<std::string> output_species;
+    int row_index = -1; // row index in ignition file for ignition parameter studies.
 
     // Physics
     int M;      // number of variables per node (dimensionality)            [-]
@@ -128,6 +129,7 @@ private:
     std::string run_mode; // "standard" or "ignition"
     std::string ign_cond; // "T_max" for now
     double T_max;
+    bool ignited = false;
 
     // Operators
     MatrixXd ddx;
