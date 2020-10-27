@@ -68,6 +68,18 @@ void Solver::ReadParams(int argc, char* argv[]){
         dt = toml::find(Mesh_, "Time", "dt").as_floating();
     }
 
+    // Run mode
+    {
+      const auto RunMode_ = toml::find(data, "Run_mode");
+      run_mode = toml::find(RunMode_, "mode").as_string();
+      if (run_mode == "ignition"){
+        ign_cond = toml::find(RunMode_,"ignition_condition").as_string();
+        if (ign_cond == "T_max"){
+          T_max = toml::find(RunMode_,"T_max").as_floating();
+        }
+      }
+    }
+
     // Physics
     {
         const auto Physics_ = toml::find(data, "Physics");
@@ -620,8 +632,20 @@ void Solver::SetIC() {
     SetBCs();
 }
 
+bool Solver::CheckIgnited() {
+  bool ignited_ = false;
+  if (ign_cond == "T_max") {
+    ignited_ = (phi.col(1).maxCoeff() > T_max);
+  }
+
+  if (ignited_){
+    std::cout << " ---------------- Ignition ---------------- " << std::endl;
+  }
+  return ignited_;
+}
+
 bool Solver::CheckStop() {
-    if ((time > time_max) || (iteration > iteration_max))
+    if ((time > time_max) || (iteration > iteration_max) || (run_mode=="ignition" && CheckIgnited()))
         return true;
     else
         return false;
@@ -691,6 +715,20 @@ void Solver::Output() {
     } else {
         std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
     }
+}
+
+void Solver::OutputIgnition() {
+  // Console output
+  std::cout << "---------------------------------------------------------" << std::endl;
+  std::cout << "  Solver::OutputIgnition()" << std::endl;
+  if (ign_cond == "T_max") {
+    int max_row_;
+    double max_T_ = phi.col(1).maxCoeff(&max_row_);
+    double x_ign_ = nodes(max_row_+1);
+    double dx_ign_avg_ = (dx(max_row_) + dx(max_row_+1))/2.0;
+    std::cout << "  max(T) = " << max_T_ << " > T_max = " << T_max << std::endl;
+    std::cout << "  Ignition at x = " << x_ign_ << " where dx_avg = " << dx_ign_avg_ << std::endl;
+  }
 }
 
 void Solver::StepIntegrator() {
@@ -1057,6 +1095,11 @@ int Solver::RunSolver() {
             // Update counters
             iteration++;
             time += dt;
+        }
+
+        if (run_mode == "ignition"){
+          Output();
+          OutputIgnition();
         }
 
         return 0;

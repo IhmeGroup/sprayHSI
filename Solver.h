@@ -40,7 +40,9 @@ public:
 
 private:
     bool CheckStop();
+    bool CheckIgnited();
     void Output();
+    void OutputIgnition();
     void StepIntegrator();
     void UpdateBCs();
 
@@ -120,6 +122,11 @@ private:
         double dt;
         double time_max;
         double iteration_max;
+
+    // Run mode
+    std::string run_mode; // "standard" or "ignition"
+    std::string ign_cond; // "T_max" for now
+    double T_max;
 
     // Operators
     MatrixXd ddx;
