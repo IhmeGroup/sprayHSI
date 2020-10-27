@@ -84,6 +84,7 @@ private:
     int output_interval; //TODO could add an output interval in time as well
     std::string output_path;
     std::string output_header;
+    std::string ign_header; // header for ignition file
     std::vector<std::string> output_species;
 
     // Physics
