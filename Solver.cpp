@@ -404,7 +404,7 @@ void Solver::DerivedParams() {
     }
     output_header += "\nZONE I=" + std::to_string(N) + ", F=POINT";
 
-    ign_header = "iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file.
+    ign_header = "iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from order in which program&params were called in Python.
     for (const auto& s : output_species){
       ign_header += ",Y_" + s;
     }
