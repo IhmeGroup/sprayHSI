@@ -68,6 +68,18 @@ void Solver::ReadParams(int argc, char* argv[]){
         dt = toml::find(Mesh_, "Time", "dt").as_floating();
     }
 
+    // Run mode
+    {
+      const auto RunMode_ = toml::find(data, "Run_mode");
+      run_mode = toml::find(RunMode_, "mode").as_string();
+      if (run_mode == "ignition"){
+        ign_cond = toml::find(RunMode_,"ignition_condition").as_string();
+        if (ign_cond == "T_max"){
+          T_max = toml::find(RunMode_,"T_max").as_floating();
+        }
+      }
+    }
+
     // Physics
     {
         const auto Physics_ = toml::find(data, "Physics");
@@ -392,6 +404,11 @@ void Solver::DerivedParams() {
     }
     output_header += "\nZONE I=" + std::to_string(N) + ", F=POINT";
 
+    ign_header = "iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from order in which program&params were called in Python.
+    for (const auto& s : output_species){
+      ign_header += ",Y_" + s;
+    }
+
     // Map of pointer to mass fractions array
     Map<const VectorXd> md_(gas->massFractions(), gas->nSpecies());
 
@@ -620,8 +637,20 @@ void Solver::SetIC() {
     SetBCs();
 }
 
+bool Solver::CheckIgnited() {
+  bool ignited_ = false;
+  if (ign_cond == "T_max") {
+    ignited_ = (phi.col(1).maxCoeff() > T_max);
+  }
+
+  if (ignited_){
+    std::cout << " ---------------- Ignition ---------------- " << std::endl;
+  }
+  return ignited_;
+}
+
 bool Solver::CheckStop() {
-    if ((time > time_max) || (iteration > iteration_max))
+    if ((time > time_max) || (iteration > iteration_max) || (run_mode=="ignition" && CheckIgnited()))
         return true;
     else
         return false;
@@ -691,6 +720,53 @@ void Solver::Output() {
     } else {
         std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
     }
+}
+
+void Solver::OutputIgnition() {
+  // Console output
+  std::cout << "---------------------------------------------------------" << std::endl;
+  std::cout << "  Solver::OutputIgnition()" << std::endl;
+  int max_row_;
+  double max_T_ = phi.col(1).maxCoeff(&max_row_);
+  double x_ign_ = nodes(max_row_+1);
+  double dx_ign_avg_ = (dx(max_row_) + dx(max_row_+1))/2.0;
+  if (ign_cond == "T_max") {
+    std::cout << "  max(T) = " << max_T_ << " > T_max = " << T_max << std::endl;
+    std::cout << "  Ignition at x = " << x_ign_ << " where dx_avg = " << dx_ign_avg_ << std::endl;
+  }
+  // Write to "ignition" file
+  std::string ign_file_path_ = output_path + "ignition_data.csv";
+  if (!std::ifstream(ign_file_path_)){
+    std::cout << "Creating ignition_data.csv" << std::endl;
+    std::ofstream ign_file_(ign_file_path_);
+    ign_file_ << ign_header << std::endl;
+  }
+
+  // Create Phi = [wall_BC, phi, inlet_BC]^T
+  MatrixXd Phi(wall_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
+  Phi << wall_BC, phi, inlet_BC;
+
+  std::ofstream ign_file_(ign_file_path_, std::ios_base::app);
+  if (ign_file_.is_open()){
+    std::cout << "Writing to ignition_data.csv" << std::endl;
+    //iteration,time, and x,dx_avg,u,ZBilger,rho,V,T,Zl,md,Y_k @ ignition location, ignition time
+    ign_file_ <<
+    iteration << "," <<
+    time << "," <<
+    x_ign_ << "," <<
+    dx_ign_avg_ << "," <<
+    Getu(Phi,max_row_+1) << "," <<
+    GetZBilger(Phi,max_row_+1) << "," <<
+    Getrho(phi.row(max_row_)) << "," <<
+    phi(max_row_,0) << "," <<
+    phi(max_row_,1) << "," <<
+    phi(max_row_,2) << "," <<
+    phi(max_row_,3);
+    for (const auto& s : output_species){
+      ign_file_ << "," << Phi(max_row_,m + GetSpeciesIndex(s));
+    }
+    ign_file_ << std::endl;
+  }
 }
 
 void Solver::StepIntegrator() {
@@ -1057,6 +1133,11 @@ int Solver::RunSolver() {
             // Update counters
             iteration++;
             time += dt;
+        }
+
+        if (run_mode == "ignition"){
+          Output();
+          OutputIgnition();
         }
 
         return 0;

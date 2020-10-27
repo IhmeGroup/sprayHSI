@@ -40,7 +40,9 @@ public:
 
 private:
     bool CheckStop();
+    bool CheckIgnited();
     void Output();
+    void OutputIgnition();
     void StepIntegrator();
     void UpdateBCs();
 
@@ -82,6 +84,7 @@ private:
     int output_interval; //TODO could add an output interval in time as well
     std::string output_path;
     std::string output_header;
+    std::string ign_header; // header for ignition file
     std::vector<std::string> output_species;
 
     // Physics
@@ -120,6 +123,11 @@ private:
         double dt;
         double time_max;
         double iteration_max;
+
+    // Run mode
+    std::string run_mode; // "standard" or "ignition"
+    std::string ign_cond; // "T_max" for now
+    double T_max;
 
     // Operators
     MatrixXd ddx;
