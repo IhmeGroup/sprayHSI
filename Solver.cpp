@@ -1172,6 +1172,8 @@ int Solver::cvode_RHS(double t, N_Vector y, N_Vector ydot, void* f_data) {
 
 Solver::~Solver() {
     std::cout << "Solver::~Solver()" << std::endl;
-    N_VDestroy_Serial(cvode_y);
-    CVodeFree(&cvode_mem);
+    if (time_scheme == "CVODE"){
+      N_VDestroy_Serial(cvode_y);
+      CVodeFree(&cvode_mem);
+    }
 }
