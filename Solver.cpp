@@ -1148,7 +1148,7 @@ int Solver::RunSolver() {
             time += dt;
         }
 
-        if (run_mode == "ignition"){
+        if (ignited){
           Output();
           OutputIgnition();
         }
