@@ -10,7 +10,7 @@
 template <class T>
 struct GeometricRatioFunctor
 {
-  //  cube root of x using only function - no derivatives.
+  //  root finding problem, no derivatives.
   GeometricRatioFunctor(T const& N_, T const& L_, T const& D0_) : N(N_), L(L_), D0(D0_)
   { /* Constructor just stores value a to find root of. */ }
   T operator()(T const& r)

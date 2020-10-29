@@ -719,6 +719,8 @@ void Solver::Output() {
     std::string output_name_;
     if (ignited && run_mode == "ignition")
       output_name_ = input_name + "_" + "ign_row_" + std::to_string(row_index) + ".dat";
+    else if (!ignited && run_mode == "ignition")
+      output_name_ = input_name + "_" + "no_ign_row_" + std::to_string(row_index) + ".dat";
     else
        output_name_ = input_name + "_" + std::to_string(iteration) + ".dat";
     std::ofstream output_file(output_path + output_name_);
@@ -827,11 +829,11 @@ double Solver::Getu(const Ref<const MatrixXd>& Phi_, int i){
 double Solver::GetZBilger(const Ref<const MatrixXd>& Phi_, int i){
   // This function is mostly from CharlesX, PhysicsDeriveFunctor.h, Hao Wu 2017.
 
-  /**
-     *             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H + (Y_O - Yo_O)/W_O
-     * ZBilger =  -----------------------------------------------------------
-     *            2(Yf_C - Yo_C)/W_C + (Yf_H - Yo_H)/2W_H + (Yf_O - Yo_O)/W_O
-     */
+  /*
+   *             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H + (Y_O - Yo_O)/W_O
+   * ZBilger =  -----------------------------------------------------------
+   *            2(Yf_C - Yo_C)/W_C + (Yf_H - Yo_H)/2W_H + (Yf_O - Yo_O)/W_O
+   */
 
   size_t i_C = gas->elementIndex("C");
   size_t i_H = gas->elementIndex("H");
@@ -859,7 +861,7 @@ double Solver::GetZBilger(const Ref<const MatrixXd>& Phi_, int i){
   double num_   = 2.0 * (gas->elementalMassFraction(i_C) - Yo_C) / W_C
                   + 0.5 * (gas->elementalMassFraction(i_H) - Yo_H) / W_H
                   + (gas->elementalMassFraction(i_O) - Yo_O) / W_O;
-  return num_/denom_;
+  return num_/denom_; // TODO ZBilger changes with reaction even in purely premixed case. Something isn't right.
 }
 
 double Solver::Quadrature(const Ref<const VectorXd>& f_, const Ref<const VectorXd>& dx_){
