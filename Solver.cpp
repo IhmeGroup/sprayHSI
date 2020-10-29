@@ -574,7 +574,7 @@ void Solver::ConstructOperators() {
 
     // d2dx2
     // 2nd-order central
-    // generalized to non-uniform grids
+    // generalized to non-uniform grids (my derivation)
 
     // resize matrix
     d2dx2 = MatrixXd::Zero(N,N+2);
@@ -583,9 +583,9 @@ void Solver::ConstructOperators() {
     for (int i = 0; i < N; i++){
         for (int j = 0; j < N+2; j++){
             if (i+1 == j){
-                d2dx2(i,j-1) =  2.0/(dx(i) * (dx(i) + dx(i+1)));
-                d2dx2(i,j)   = -2.0/(dx(i)*dx(i+1));
-                d2dx2(i,j+1) =  2.0/(dx(i) * (dx(i) + dx(i+1)));
+                d2dx2(i,j-1) = (4.0 * dx(i+1))/((dx(i)*dx(i) + dx(i+1)*dx(i+1))*(dx(i)+dx(i+1)));
+                d2dx2(i,j) = -4.0/(dx(i)*dx(i) + dx(i+1)*dx(i+1));
+                d2dx2(i,j+1) = (4.0 * dx(i))/((dx(i)*dx(i) + dx(i+1)*dx(i+1))*(dx(i)+dx(i+1)));
             }
         }
     }
