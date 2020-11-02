@@ -454,6 +454,7 @@ void Solver::DerivedParams() {
 
 std::string Solver::GetCoolPropName(const std::string cantera_name){
     std::map<std::string, std::string> cantera_to_CoolProp = {
+            {"NC12H26","NC12H26"},
             {"N-C12H26","NC12H26"},
             {"KERO_LUCHE","NC12H26"}
     };
