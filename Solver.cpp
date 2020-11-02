@@ -861,7 +861,7 @@ double Solver::GetZBilger(const Ref<const MatrixXd>& Phi_, int i){
   double num_   = 2.0 * (gas->elementalMassFraction(i_C) - Yo_C) / W_C
                   + 0.5 * (gas->elementalMassFraction(i_H) - Yo_H) / W_H
                   + (gas->elementalMassFraction(i_O) - Yo_O) / W_O;
-  return num_/denom_; // TODO ZBilger changes with reaction even in purely premixed case. Something isn't right.
+  return num_/denom_;
 }
 
 double Solver::Quadrature(const Ref<const VectorXd>& f_, const Ref<const VectorXd>& dx_){
