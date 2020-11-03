@@ -719,11 +719,11 @@ void Solver::Output() {
     // File output
     std::string output_name_;
     if (ignited && run_mode == "ignition")
-      output_name_ = input_name + "_" + "ign_row_" + std::to_string(row_index) + ".dat";
+      output_name_ = input_name + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_ign.dat";
     else if (!ignited && run_mode == "ignition")
-      output_name_ = input_name + "_" + "no_ign_row_" + std::to_string(row_index) + ".dat";
+      output_name_ = input_name + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_notign.dat";
     else
-       output_name_ = input_name + "_" + std::to_string(iteration) + ".dat";
+       output_name_ = input_name + "_iter_" + std::to_string(iteration) + ".dat";
     std::ofstream output_file(output_path + output_name_);
     if (output_file.is_open()){
         std::cout << "Writing " << output_name_ << std::endl;
