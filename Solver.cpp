@@ -290,23 +290,23 @@ void Solver::SetupGas() {
     std::cout << "Solver::SetupGas()" << std::endl;
 
     // Gas object
-    gas = newPhase(mech_file, phase_name);
+    gas = std::unique_ptr<ThermoPhase>(newPhase(mech_file, phase_name));
 
     // Kinetics
     if (mech_qss){
-      gas_qss = newPhase(mech_file, "QSS");
-      std::vector<ThermoPhase *> phases_{gas, gas_qss};
+      gas_qss = std::unique_ptr<ThermoPhase>(newPhase(mech_file, "QSS"));
+      std::vector<ThermoPhase *> phases_{gas.get(), gas_qss.get()};
 
-      kin = new GasQSSKinetics();
-      importKinetics(gas_qss->xml(), phases_, kin);
+      kin = std::unique_ptr<Kinetics>(new GasQSSKinetics());
+      importKinetics(gas_qss->xml(), phases_, kin.get());
 
     } else {
-      std::vector<ThermoPhase *> phases_{gas};
-      kin = newKineticsMgr(gas->xml(), phases_);
+      std::vector<ThermoPhase *> phases_{gas.get()};
+      kin = std::unique_ptr<Kinetics>(newKineticsMgr(gas->xml(), phases_));
     }
 
     // Transport properties
-    trans = newDefaultTransportMgr(gas);
+    trans = std::unique_ptr<Transport>(newDefaultTransportMgr(gas.get()));
 
     M = m + gas->nSpecies();
 

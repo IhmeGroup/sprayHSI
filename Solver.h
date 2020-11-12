@@ -139,13 +139,13 @@ private:
     std::string mech_file;
     std::string phase_name;
     bool mech_qss = false;
-    ThermoPhase* gas;
-    ThermoPhase* gas_qss;
-    Kinetics* kin;
+    std::unique_ptr<ThermoPhase> gas;
+    std::unique_ptr<ThermoPhase> gas_qss;
+    std::unique_ptr<Kinetics> kin;
     VectorXd omega_dot_mol;
     VectorXd species_enthalpies_mol;
     bool reacting;
-    Transport* trans;
+    std::unique_ptr<Transport> trans;
     VectorXd mix_diff_coeffs;
     std::string X_ox; // oxidizer and fuel mass fractions for ZBilger
     std::string X_f;
