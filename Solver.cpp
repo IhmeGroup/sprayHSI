@@ -820,7 +820,7 @@ double Solver::Getu(const Ref<const MatrixXd>& Phi_, int i){
         // no-slip wall
         return 0.0;
     } else {
-        //TODO this can be made vastly more efficient by keeping track of the integral
+        // this could be made somewhat more efficient by keeping track of the integral
         VectorXd rho_vec = Getrho(Phi_.topRows(i + 1));
         VectorXd V_vec = Phi_.col(0).head(i + 1);
         return -(2.0 / rho_vec(i)) * Quadrature(rho_vec.array() * V_vec.array(), dx.head(i));
