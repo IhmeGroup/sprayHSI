@@ -257,7 +257,7 @@ void Solver::SetupSolver() {
   std::cout << "  Eigen::nbThreads() = " << Eigen::nbThreads() << std::endl;
   if (time_scheme == "CVODE") {
     // Steps from Sec. 4.4 of CVODE User Guide (V2.7.0)
-    double t0 = 0.0; // initial time
+    double t0 = time; // initial time
 
     // 2. Set problem dimensions
     cvode_N = N * M;
@@ -648,6 +648,9 @@ void Solver::SetIC() {
             phi.col(k) = Y_0(k - m) * VectorXd::Constant(N, 1.0);
         }
       }
+      // Set time and iteration to initial condition
+      iteration = 0;
+      time = 0.0;
     } else {
       std::cout << "> Restart from file: " << restart_file << std::endl;
       // Set IC using restart file
@@ -748,7 +751,13 @@ void Solver::SetIC() {
       // Close file
       data_stream_.close();
 
-      // TODO Set time and iteration based on file name
+      // Set time and iteration based on file name
+      // Start with something like "ignition_iter_100_row_0_notign.dat"
+      std::vector<std::string> tmp;
+      boost::split(tmp, restart_file, [](char c) { return c == '_'; });
+      // Now have ["ignition", "iter", "100", "row", "0", "notign.dat"]
+      iteration = std::stoi(tmp[tmp.size() - 4]); // do it this way since input file name may have had "_" in it
+      time = iteration * dt;
     }
 
     if (verbose){
@@ -1238,8 +1247,6 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
 int Solver::RunSolver() {
     std::cout << "Solver::RunSolver()" << std::endl;
 
-    iteration = 0;
-    time = 0.0;
     try {
         while(!CheckStop()){
 
