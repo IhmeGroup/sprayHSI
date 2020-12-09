@@ -165,6 +165,7 @@ private:
     VectorXd Y_0; // derived
     double Z_l_0;
     double m_d_0;
+    std::string restart_file;
 
     // BCs
         // Inlet

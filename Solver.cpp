@@ -167,25 +167,33 @@ void Solver::ReadParams(int argc, char* argv[]){
     // ICs
     {
         const auto ICs_ = toml::find(data, "ICs");
-        // Gas
-        const auto Gas_ = toml::find(ICs_,"Gas");
-            IC_type = toml::find(Gas_, "type").as_string();
-            if (IC_type == "linear_T") {
-                Tgas_0 = -1.0;
-                if (wall_type == "adiabatic"){
-                    std::cerr << "IC_type " << IC_type << " and wall_type " << wall_type << " not a permitted combination" << std::endl;
-                }
-            } else if (IC_type == "constant_T") {
-                Tgas_0 = toml::find(Gas_, "T").as_floating();
-            } else {
-                std::cerr << "Unknown IC type " << IC_type << "not supported" << std::endl;
-                throw(0);
+
+        // Restart
+        std::string tmp = toml::find_or<std::string>(ICs_,"restart","");
+        if (tmp.empty()) {
+          // Gas
+          const auto Gas_ = toml::find(ICs_, "Gas");
+          IC_type = toml::find(Gas_, "type").as_string();
+          if (IC_type == "linear_T") {
+            Tgas_0 = -1.0;
+            if (wall_type == "adiabatic") {
+              std::cerr << "IC_type " << IC_type << " and wall_type " << wall_type << " not a permitted combination"
+                        << std::endl;
             }
-            X_0 = toml::find(Gas_, "X").as_string();
-        // Spray
-        const auto Spray_ = toml::find(ICs_,"Spray");
-            Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
-            m_d_0 = toml::find(Spray_, "m_d").as_floating();
+          } else if (IC_type == "constant_T") {
+            Tgas_0 = toml::find(Gas_, "T").as_floating();
+          } else {
+            std::cerr << "Unknown IC type " << IC_type << "not supported" << std::endl;
+            throw (0);
+          }
+          X_0 = toml::find(Gas_, "X").as_string();
+          // Spray
+          const auto Spray_ = toml::find(ICs_, "Spray");
+          Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
+          m_d_0 = toml::find(Spray_, "m_d").as_floating();
+        } else {
+          restart_file = tmp;
+        }
     }
 
     // Override input file using command line
@@ -311,9 +319,9 @@ void Solver::SetupGas() {
     M = m + gas->nSpecies();
 
     if (verbose) {
-        gas->setState_TPX(T_in, p_sys, X_0); // TODO this comes out as X_in ?!?
+        gas->setState_TPX(T_in, p_sys, X_in);
         std::cout << "  SetupGas() at T = " << gas->temperature() << " and p = " << gas->pressure()
-                  << " gives viscosity = " << trans->viscosity() << " for X = " << X_0 << std::endl;
+                  << " gives viscosity = " << trans->viscosity() << " for X = " << X_in << std::endl;
     }
 }
 
@@ -420,9 +428,12 @@ void Solver::DerivedParams() {
     // Map of pointer to mass fractions array
     Map<const VectorXd> md_(gas->massFractions(), gas->nSpecies());
 
-    // Initial mass fractions
-    gas->setState_TPX(T_in,p_sys,X_0); // choice of temperature shouldn't make a difference for computing mass fractions here
-    Y_0 = md_;
+    // Initial mass fractions, if not using restart file
+    if (restart_file.empty()) {
+      gas->setState_TPX(T_in, p_sys,
+                        X_0); // choice of temperature shouldn't make a difference for computing mass fractions here
+      Y_0 = md_;
+    }
 
     // Inlet mass fractions
     gas->setState_TPX(T_in,p_sys,X_in);
@@ -600,42 +611,144 @@ void Solver::ConstructOperators() {
 void Solver::SetIC() {
     std::cout << "Solver::SetIC()" << std::endl;
 
-    // TODO make this polymorphic
-
-    // loop over all variables
-    for (int k = 0; k < M; k++){
-        switch (k){
-            // V
-            case 0:
-                phi.col(k) = VectorXd::Zero(N);
-                break;
+    if (restart_file.empty()) {
+      std::cout << "> Restart using initial conditions" << std::endl;
+      // loop over all variables
+      for (int k = 0; k < M; k++) {
+        switch (k) {
+          // V
+          case 0:
+            phi.col(k) = VectorXd::Zero(N);
+            break;
             // T
-            case 1:
-                if (IC_type == "linear_T"){
-                  double T_ = T_wall;
-                  for (int i = 0; i < N; i++){
-                    T_ += (T_in - T_wall)/L * dx[i];
-                    phi(i,k) = T_;
-                  }
-                } else if (IC_type == "constant_T"){
-                    phi.col(k) = Tgas_0*VectorXd::Constant(N,1.0);
-                } else {
-                    // should have already caught this "unknown type" error
-                    throw(0);
-                }
-                break;
+          case 1:
+            if (IC_type == "linear_T") {
+              double T_ = T_wall;
+              for (int i = 0; i < N; i++) {
+                T_ += (T_in - T_wall) / L * dx[i];
+                phi(i, k) = T_;
+              }
+            } else if (IC_type == "constant_T") {
+              phi.col(k) = Tgas_0 * VectorXd::Constant(N, 1.0);
+            } else {
+              // should have already caught this "unknown type" error
+              throw (0);
+            }
+            break;
             // Z_l
-            case 2:
-                phi.col(k) = Z_l_0*VectorXd::Constant(N,1.0);
-                break;
+          case 2:
+            phi.col(k) = Z_l_0 * VectorXd::Constant(N, 1.0);
+            break;
             // m_d
-            case 3:
-                // Set to very small number to ensure T and Z_l spray source terms don't become undefined
-                phi.col(k) = m_d_0*VectorXd::Constant(N,1.0);
-                break;
-            default:
-                phi.col(k) = Y_0(k-m)*VectorXd::Constant(N,1.0);
+          case 3:
+            // Set to very small number to ensure T and Z_l spray source terms don't become undefined
+            phi.col(k) = m_d_0 * VectorXd::Constant(N, 1.0);
+            break;
+          default:
+            phi.col(k) = Y_0(k - m) * VectorXd::Constant(N, 1.0);
         }
+      }
+    } else {
+      std::cout << "> Restart from file: " << restart_file << std::endl;
+      // Set IC using restart file
+      // ASSUME no change in BCs NOR variables NOR (outer) dt
+      // Allow a change in number of points; interpolate
+
+      // Open file
+      std::ifstream data_stream_(restart_file);
+      if (!data_stream_.is_open()){
+        std::cerr << "Unable to open file" << restart_file << std::endl;
+        throw(0);
+      }
+      std::string line;
+      // discard first line
+      std::getline(data_stream_, line);
+
+      // count number of variables m_ from VARIABLES = ...
+      int m_;
+      {
+        std::getline(data_stream_, line);
+        // Start with something like "A:0.7 B:0.3"
+        std::vector<std::string> vars;
+        boost::split(vars, line, [](char c) { return c == ' '; });
+        // Now have ["A:0.7", "B:0.3"]
+        m_ = vars.size() - 2; // remove "VARIABLES" and "="
+        assert(m_ - 4 ==
+               M); // Derived vars X u ZBilger Rho not considered, restart file must have same number of vars as current sim
+      }
+
+      // get number of grid points n_ from ZONE I= ...; assert r > 2
+      int n_;
+      {
+        std::getline(data_stream_, line);
+        // Start with something like "ZONE I=14"
+        std::vector<std::string> tmp;
+        boost::split(tmp, line, [](char c) { return c == ' '; });
+        // Now have ["ZONE", "I=14"]
+        std::vector<std::string> tmp2;
+        boost::split(tmp2, tmp[1], [](char c) { return c == '='; });
+        // Now have ["I", "14"]
+        n_ = std::stoi(tmp2[1]);
+      }
+
+      // create Eigen matrix old_mat of size nxm from data
+      MatrixXd old_mat = MatrixXd::Zero(n_, m_);
+      {
+        for (int i = 0; i < n_; i++) {
+          std::getline(data_stream_, line);
+          // Start with something like "0.0 0.5 0.6"
+          std::vector<std::string> tmp;
+          boost::split(tmp, line, [](char c) { return c == ' '; }, boost::token_compress_on);
+          if (tmp[0].empty()) tmp.erase(tmp.begin());
+          // Now have ["0.0", "0.5", "0.6"]
+          for (int j = 0; j < m_; j++) {
+            old_mat(i, j) = std::stod(tmp[j]);
+          }
+        }
+      }
+
+      if (verbose) std::cout << "Data read from file: " << std::endl << old_mat << std::endl;
+
+      // create position vector old_nodes from old_mat.col(0)
+      VectorXd old_nodes = old_mat.col(0);
+
+      // create old_Phi from old_mat.cols(4:end)
+      MatrixXd old_Phi = old_mat.rightCols(m_-4);
+
+      // interpolate phi from old_Phi using nodes and old_nodes
+      {
+        VectorXd c0 = VectorXd::Zero(N);
+        VectorXi i_c0 = VectorXi::Zero(N);
+        // loop on new interior nodes
+        for (int i = 0; i < N; i++) {
+          // find old_node to the left of current node. Always available since phi is interior, and old_Phi is full domain.
+          double eps = 1.0e-10; // in case restarting from identical mesh
+          int j = 0;
+          while (old_nodes(j) < nodes(i + 1) + eps) {
+            j++;
+          }
+          j -= 1;
+          i_c0(i) = j;
+          c0(i) = -(nodes(i + 1) - old_nodes(j)) / (old_nodes(j + 1) - old_nodes(j)) + 1.0;
+        }
+        VectorXd c1 = VectorXd::Ones(N) - c0;
+        // Create interpolation matrix
+        MatrixXd A = MatrixXd::Zero(N, n_);
+        for (int i = 0; i < N; i++) {
+          for (int j = 0; j < n_; j++) {
+            if (j == i_c0(i)) {
+              A(i, j) = c0(i);
+              A(i, j + 1) = c1(i);
+            }
+          }
+        }
+        phi = A * old_Phi;
+      }
+
+      // Close file
+      data_stream_.close();
+
+      // TODO Set time and iteration based on file name
     }
 
     if (verbose){
