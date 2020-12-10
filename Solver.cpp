@@ -5,6 +5,7 @@
 #include <math.h>
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
 #include "Solver.h"
 #include "toml.hpp"
 #include "CoolProp.h"
@@ -660,7 +661,7 @@ void Solver::SetIC() {
       // Open file
       std::ifstream data_stream_(restart_file);
       if (!data_stream_.is_open()){
-        std::cerr << "Unable to open file" << restart_file << std::endl;
+        std::cerr << "Unable to open file: " << restart_file << std::endl;
         throw(0);
       }
       std::string line;
@@ -756,8 +757,17 @@ void Solver::SetIC() {
       std::vector<std::string> tmp;
       boost::split(tmp, restart_file, [](char c) { return c == '_'; });
       // Now have ["ignition", "iter", "100", "row", "0", "notign.dat"]
-      iteration = std::stoi(tmp[tmp.size() - 4]); // do it this way since input file name may have had "_" in it
-      time = iteration * dt;
+      std::vector<std::string>::iterator it = std::find(tmp.begin(), tmp.end(), "iter");
+      if (it != tmp.end()) {
+        std::advance(it,1);
+        iteration = std::stoi(*(it));
+        time = iteration * dt;
+        std::cout << ">  iteration: " << iteration << std::endl;
+        std::cout << ">  time: " << time << " [s]" << std::endl;
+      } else{
+        std::cerr << "Could not determine iteration from restart file: " << restart_file << std::endl;
+        throw(0);
+      }
     }
 
     if (verbose){
