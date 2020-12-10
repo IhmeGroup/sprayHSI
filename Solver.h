@@ -97,6 +97,18 @@ private:
     int n_omp_threads = 1;
     double av_Zl = 0.0;
     double av_md = 0.0;
+    VectorXd u;
+    VectorXd rho_inv;
+    MatrixXd c;
+    MatrixXd mu;
+    MatrixXd mu_av;
+    MatrixXd omegadot;
+    VectorXd mdot_liq;
+    MatrixXd Gammadot;
+    MatrixXd conv;
+    MatrixXd diff;
+    MatrixXd src_gas;
+    MatrixXd src_spray;
       // CVODE
       void* cvode_mem;
       long int cvode_N;
@@ -132,8 +144,8 @@ private:
     bool ignited = false;
 
     // Operators
-    MatrixXd ddx;
-    MatrixXd d2dx2;
+    SparseMatrix<double> ddx;
+    SparseMatrix<double> d2dx2;
 
     // Gas
     std::string mech_file;

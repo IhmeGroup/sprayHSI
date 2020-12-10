@@ -462,6 +462,16 @@ void Solver::DerivedParams() {
         T_l = L_v = rho_l = 0.0;
         fuel_idx = -1;
     }
+
+    // Resizing arrays
+    u = VectorXd::Zero(N);
+    rho_inv = VectorXd::Zero(N);
+    c = MatrixXd::Zero(N,M);
+    mu = MatrixXd::Zero(N,M);
+    mu_av = MatrixXd::Zero(N,M);
+    omegadot = MatrixXd::Zero(N,M);
+    mdot_liq = VectorXd::Zero(N);
+    Gammadot = MatrixXd::Zero(N,M);
 }
 
 std::string Solver::GetCoolPropName(const std::string cantera_name){
@@ -573,14 +583,15 @@ void Solver::ConstructOperators() {
     // generalized to non-uniform grids
 
     // resize matrix
-    ddx = MatrixXd::Zero(N,N+2);
+    ddx.resize(N,N+2);
+    ddx.reserve(2*N);
 
     // fill matrix
     for (int i = 0; i < N; i++){
         for (int j = 0; j < N+2; j++){
             if (i+1 == j){
-                ddx(i,j)   = -1.0/dx(i+1);
-                ddx(i,j+1) =  1.0/dx(i+1);
+                ddx.insert(i,j)   = -1.0/dx(i+1);
+                ddx.insert(i,j+1) =  1.0/dx(i+1);
             }
         }
     }
@@ -590,22 +601,23 @@ void Solver::ConstructOperators() {
     // generalized to non-uniform grids (my derivation)
 
     // resize matrix
-    d2dx2 = MatrixXd::Zero(N,N+2);
+    d2dx2.resize(N,N+2);
+    d2dx2.reserve(3*N);
 
     // fill matrix
     for (int i = 0; i < N; i++){
         for (int j = 0; j < N+2; j++){
             if (i+1 == j){
-                d2dx2(i,j-1) = (4.0 * dx(i+1))/((dx(i)*dx(i) + dx(i+1)*dx(i+1))*(dx(i)+dx(i+1)));
-                d2dx2(i,j) = -4.0/(dx(i)*dx(i) + dx(i+1)*dx(i+1));
-                d2dx2(i,j+1) = (4.0 * dx(i))/((dx(i)*dx(i) + dx(i+1)*dx(i+1))*(dx(i)+dx(i+1)));
+                d2dx2.insert(i,j-1) = (4.0 * dx(i+1))/((dx(i)*dx(i) + dx(i+1)*dx(i+1))*(dx(i)+dx(i+1)));
+                d2dx2.insert(i,j) = -4.0/(dx(i)*dx(i) + dx(i+1)*dx(i+1));
+                d2dx2.insert(i,j+1) = (4.0 * dx(i))/((dx(i)*dx(i) + dx(i+1)*dx(i+1))*(dx(i)+dx(i+1)));
             }
         }
     }
 
     if (verbose){
-        std::cout << "ddx = \n" << ddx << std::endl;
-        std::cout << "d2dx2 = \n" << d2dx2 << std::endl;
+        std::cout << "ddx = \n" << MatrixXd(ddx) << std::endl;
+        std::cout << "d2dx2 = \n" << MatrixXd(d2dx2) << std::endl;
     }
 }
 
@@ -1208,16 +1220,6 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
     std::cout << "  Phi = " << std::endl << Phi << std::endl;
   }
 
-  // initialize vectors and matrices
-  VectorXd u(VectorXd::Zero(N));
-  VectorXd rho_inv(VectorXd::Zero(N));
-  MatrixXd c(MatrixXd::Zero(N,M));
-  MatrixXd mu(MatrixXd::Zero(N,M));
-  MatrixXd mu_av(MatrixXd::Zero(N,M));
-  MatrixXd omegadot(MatrixXd::Zero(N,M));
-  VectorXd mdot_liq(VectorXd::Zero(N));
-  MatrixXd Gammadot(MatrixXd::Zero(N,M));
-
   for (int i = 0; i < N; i++){
     u(i) = Getu(Phi, i+1);
     SetState(Phi.row(i+1));
@@ -1243,10 +1245,10 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
    * src_gas      = (diag(rho_inv)*c) .* omegadot                                  (gas source)
    * src_spray    = (diag(rho_inv)*c) .* (diag(mdot_liq) * Gammadot)               (spray source, pure fuels only)
    */
-  MatrixXd conv = -1.0*u.asDiagonal() * (ddx * Phi);
-  MatrixXd diff = (rho_inv.asDiagonal() * c).array() * ((mu + mu_av).array() * (d2dx2 * Phi).array());
-  MatrixXd src_gas  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
-  MatrixXd src_spray = (rho_inv.asDiagonal() * c).array() * (mdot_liq.asDiagonal() * Gammadot).array();
+  conv = -1.0*u.asDiagonal() * (ddx * Phi);
+  diff = (rho_inv.asDiagonal() * c).array() * ((mu + mu_av).array() * (d2dx2 * Phi).array());
+  src_gas  = (rho_inv.asDiagonal() * c).array() * omegadot.array();
+  src_spray = (rho_inv.asDiagonal() * c).array() * (mdot_liq.asDiagonal() * Gammadot).array();
 
   if (verbose)
     std::cout << "RHS = " << std::endl << conv + diff + src_gas + src_spray << std::endl;
