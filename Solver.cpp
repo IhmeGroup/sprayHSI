@@ -256,6 +256,11 @@ void Solver::SetupSolver() {
   std::cout << "Solver::SetupSolver()" << std::endl;
   omp_set_num_threads(n_omp_threads);
   std::cout << "  Eigen::nbThreads() = " << Eigen::nbThreads() << std::endl;
+  Eigen::initParallel();
+  #pragma omp parallel
+  {
+    std::cout << "    Thread #" << omp_get_thread_num() << " reporting" << std::endl;
+  }
   if (time_scheme == "CVODE") {
     // Steps from Sec. 4.4 of CVODE User Guide (V2.7.0)
     double t0 = time; // initial time
@@ -464,6 +469,7 @@ void Solver::DerivedParams() {
     }
 
     // Resizing arrays
+    Phi = MatrixXd::Zero(N+2, M);
     u = VectorXd::Zero(N);
     rho_inv = VectorXd::Zero(N);
     c = MatrixXd::Zero(N,M);
@@ -1212,7 +1218,6 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
   SetBCs();
 
   // Create Phi = [wall_BC, phi, inlet_BC]^T
-  MatrixXd Phi(wall_BC.rows() + phi_.rows() + inlet_BC.rows(), phi_.cols());
   Phi << wall_BC, phi_, inlet_BC;
 
   if (verbose) {
@@ -1226,6 +1231,7 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
     SetDerivedVars();
     rho_inv(i) = 1.0/gas->density();
     mdot_liq(i) = Getmdot_liq(Phi.row(i+1));
+    #pragma omp parallel for
     for (int k = 0; k < M; k++){
       c(i, k) = Getc(k);
       mu(i, k) = Getmu(k);

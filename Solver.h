@@ -97,6 +97,7 @@ private:
     int n_omp_threads = 1;
     double av_Zl = 0.0;
     double av_md = 0.0;
+    MatrixXd Phi;
     VectorXd u;
     VectorXd rho_inv;
     MatrixXd c;
