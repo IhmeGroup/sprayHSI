@@ -303,31 +303,37 @@ void Solver::CheckCVODE(std::string func_name, int flag) {
 void Solver::SetupGas() {
     std::cout << "Solver::SetupGas()" << std::endl;
 
-    // Gas object
-    gas = std::unique_ptr<ThermoPhase>(newPhase(mech_file, phase_name));
+    for (int i=0; i<omp_get_max_threads(); i++) {
+      // Gas object
+      gas_vec.push_back(std::unique_ptr<ThermoPhase>(newPhase(mech_file, phase_name)));
 
-    // Kinetics
-    if (mech_qss){
-      gas_qss = std::unique_ptr<ThermoPhase>(newPhase(mech_file, "QSS"));
-      std::vector<ThermoPhase *> phases_{gas.get(), gas_qss.get()};
+      // Kinetics
+      if (mech_qss) {
+        gas_qss_vec.push_back(std::unique_ptr<ThermoPhase>(newPhase(mech_file, "QSS")));
+        std::vector<ThermoPhase *> phases_{gas_vec[i].get(), gas_qss_vec[i].get()};
 
-      kin = std::unique_ptr<Kinetics>(new GasQSSKinetics());
-      importKinetics(gas_qss->xml(), phases_, kin.get());
+        kin_vec.push_back(std::unique_ptr<Kinetics>(new GasQSSKinetics()));
+        importKinetics(gas_qss_vec[i]->xml(), phases_, kin_vec[i].get());
 
-    } else {
-      std::vector<ThermoPhase *> phases_{gas.get()};
-      kin = std::unique_ptr<Kinetics>(newKineticsMgr(gas->xml(), phases_));
+      } else {
+        std::vector<ThermoPhase *> phases_{gas_vec[i].get()};
+        kin_vec.push_back(std::unique_ptr<Kinetics>(newKineticsMgr(gas_vec[i]->xml(), phases_)));
+      }
+
+      // Transport properties
+      trans_vec.push_back(std::unique_ptr<Transport>(newDefaultTransportMgr(gas_vec[i].get())));
     }
 
-    // Transport properties
-    trans = std::unique_ptr<Transport>(newDefaultTransportMgr(gas.get()));
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
 
-    M = m + gas->nSpecies();
+    n_species = gas->nSpecies();
+    M = m + n_species;
 
     if (verbose) {
         gas->setState_TPX(T_in, p_sys, X_in);
         std::cout << "  SetupGas() at T = " << gas->temperature() << " and p = " << gas->pressure()
-                  << " gives viscosity = " << trans->viscosity() << " for X = " << X_in << std::endl;
+                  << " gives viscosity = " << trans_vec[thread]->viscosity() << " for X = " << X_in << std::endl;
     }
 }
 
@@ -400,13 +406,17 @@ void Solver::SetBCs() {
 
   // Global strain rate
   SetState(inlet_BC);
-  rho_inf = gas->density();
+  int thread = omp_get_thread_num();
+  rho_inf = gas_vec[thread]->density();
   double u_inf_ = mdot/rho_inf;
   a = u_inf_/L;
 
 }
 
 void Solver::DerivedParams() {
+
+    int thread = omp_get_thread_num();
+
     // Input file name without path
     // Start with something like "/Users/.../inputFile.in"
     std::vector<std::string> split_string_;
@@ -420,9 +430,9 @@ void Solver::DerivedParams() {
     // Header for output files
     output_header = "TITLE = \"" + input_name + "\"";
     output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
-    for (int i = 0; i < gas->nSpecies(); i++){
-        output_header += " \"Y_" + gas->speciesName(i) + "\"";
-        if (i != gas->nSpecies() - 1) output_header += ",";
+    for (int i = 0; i < gas_vec[0]->nSpecies(); i++){
+        output_header += " \"Y_" + gas_vec[0]->speciesName(i) + "\"";
+        if (i != gas_vec[0]->nSpecies() - 1) output_header += ",";
     }
     output_header += "\nZONE I=" + std::to_string(N+2) + ", F=POINT";
 
@@ -432,27 +442,29 @@ void Solver::DerivedParams() {
     }
 
     // Map of pointer to mass fractions array
-    Map<const VectorXd> md_(gas->massFractions(), gas->nSpecies());
+    Map<const VectorXd> md_(gas_vec[thread]->massFractions(), gas_vec[thread]->nSpecies());
 
     // Initial mass fractions, if not using restart file
     if (restart_file.empty()) {
-      gas->setState_TPX(T_in, p_sys,
+      gas_vec[thread]->setState_TPX(T_in, p_sys,
                         X_0); // choice of temperature shouldn't make a difference for computing mass fractions here
       Y_0 = md_;
     }
 
     // Inlet mass fractions
-    gas->setState_TPX(T_in,p_sys,X_in);
+    gas_vec[thread]->setState_TPX(T_in,p_sys,X_in);
     Y_in = md_;
 
-    // Mixture diffusion coefficients (mass-based by default)
-    mix_diff_coeffs.resize(gas->nSpecies());
+    for (int i=0; i<omp_get_max_threads(); i++) {
+      // Mixture diffusion coefficients (mass-based by default)
+      mix_diff_coeffs_vec.push_back(VectorXd::Zero(n_species));
 
-    // Molar production rates
-    omega_dot_mol.resize(gas->nSpecies());
+      // Molar production rates
+      omega_dot_mol_vec.push_back(VectorXd::Zero(n_species));
 
-    // Species molar enthalpies
-    species_enthalpies_mol.resize((gas->nSpecies()));
+      // Species molar enthalpies
+      species_enthalpies_mol_vec.push_back(VectorXd::Zero(n_species));
+    }
 
     // Spray parameters
     // TODO change for multicomponent spray
@@ -522,7 +534,8 @@ int Solver::GetSpeciesIndex(std::string cantera_string){
     std::vector<std::string> split_pair;
     boost::split(split_pair, cantera_string, [](char c){return c == ':';});
     // Now have ["A","0.7"]
-    return gas->speciesIndex(split_pair[0]);
+    int thread = omp_get_thread_num();
+    return gas_vec[thread]->speciesIndex(split_pair[0]);
 }
 
 void Solver::ConstructMesh() {
@@ -775,7 +788,7 @@ void Solver::SetIC() {
       std::vector<std::string> tmp;
       boost::split(tmp, restart_file, [](char c) { return c == '_'; });
       // Now have ["ignition", "iter", "100", "row", "0", "notign.dat"]
-      std::vector<std::string>::iterator it = std::find(tmp.begin(), tmp.end(), "iter");
+      auto it = std::find(tmp.begin(), tmp.end(), "iter");
       if (it != tmp.end()) {
         std::advance(it,1);
         iteration = std::stoi(*(it));
@@ -986,6 +999,9 @@ double Solver::GetZBilger(const Ref<const MatrixXd>& Phi_, int i){
    *            2(Yf_C - Yo_C)/W_C + (Yf_H - Yo_H)/2W_H + (Yf_O - Yo_O)/W_O
    */
 
+  int thread = omp_get_thread_num();
+  ThermoPhase* gas = gas_vec[thread].get();
+
   size_t i_C = gas->elementIndex("C");
   size_t i_H = gas->elementIndex("H");
   size_t i_O = gas->elementIndex("O");
@@ -1028,81 +1044,90 @@ double Solver::Quadrature(const Ref<const VectorXd>& f_, const Ref<const VectorX
         return 0.5*(dx_(0)*f_(0) + dx_(N_-2)*f_(N_-1)) + 0.5*(dx_.head(N_-2) + dx_.segment(1,N_-2)).transpose()*f_.segment(1,N_-2);
 }
 
-VectorXd Solver::Getrho(const Ref<const MatrixXd>& phi){
-    VectorXd rho_vec(VectorXd::Zero(phi.rows()));
-    for (int i = 0; i < phi.rows(); i++){
-        SetState(phi.row(i));
-        rho_vec(i) = gas->density();
+VectorXd Solver::Getrho(const Ref<const MatrixXd>& phi_){
+    VectorXd rho_vec(VectorXd::Zero(phi_.rows()));
+    int thread = omp_get_thread_num();
+    for (int i = 0; i < phi_.rows(); i++){
+        SetState(phi_.row(i));
+        rho_vec(i) = gas_vec[thread]->density();
     }
     return rho_vec;
 }
 
-void Solver::SetState(const Ref<const RowVectorXd>& phi){
-    //TODO make sure it's safe to use the raw pointer like this
-    gas->setState_TPY(phi(1),p_sys,phi.tail(gas->nSpecies()).data());
+void Solver::SetState(const Ref<const RowVectorXd>& phi_){
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
+    gas->setState_TPY(phi_(1),p_sys,phi_.tail(gas->nSpecies()).data());
 }
 
-double Solver::Getc(int k) {
-    double c;
+double Solver::Getc(const int k) {
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
+
+    double c_;
     switch (k){
         // T
         case 1:
-            c = 1.0/gas->cp_mass();
+            c_ = 1.0/gas->cp_mass();
             break;
         default:
-            c = 1.0;
+            c_ = 1.0;
     }
-    return c;
+    return c_;
 }
 
-double Solver::Getmu(int k) {
-    double mu;
+double Solver::Getmu(const int k) {
+    int thread = omp_get_thread_num();
+    Transport* trans = trans_vec[thread].get();
+
+    double mu_;
     switch (k){
         // V
         case 0:
-            mu = trans->viscosity();
-            //mu = 1.5e-5;
+          mu_ = trans->viscosity();
             break;
         // T
         case 1:
-            mu = trans->thermalConductivity();
-            //mu = 0.01;
+          mu_ = trans->thermalConductivity();
             break;
         // Z_l
         case 2:
-            mu = 0.0;
+          mu_ = 0.0;
             break;
         // m_d
         case 3:
-            mu = 0.0;
+          mu_ = 0.0;
             break;
         // Species
         default:
-            mu = mix_diff_coeffs(k-m);
+          mu_ = mix_diff_coeffs_vec[thread](k - m);
     }
-    return mu;
+    return mu_;
 }
 
-double Solver::Getmu_av(int k) {
+double Solver::Getmu_av(const int k) {
   // Artificial viscosity
-  double mu_av;
+  double mu_av_;
   switch (k){
       // Z_l
     case 2:
-      mu_av = av_Zl;
+      mu_av_ = av_Zl; // TODO make this physics-based
       break;
       // m_d
     case 3:
-      mu_av = av_md;
+      mu_av_ = av_md; // TODO make this physics-based
       break;
       // Other quantities receive no artificial viscosity
     default:
-      mu_av = 0.0;
+      mu_av_ = 0.0;
   }
-  return mu_av;
+  return mu_av_;
 }
 
-double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
+double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const int k) {
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
+
     double omegadot_;
     switch (k){
         // V
@@ -1112,7 +1137,7 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
         // T: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar
         case 1:
             if (reacting) {
-                omegadot_ = -species_enthalpies_mol.dot(omega_dot_mol);
+                omegadot_ = -species_enthalpies_mol_vec[thread].dot(omega_dot_mol_vec[thread]);
             }
             else
                 omegadot_ = 0.0;
@@ -1128,7 +1153,7 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
         // Species: omegadot_i^molar * molarmass_i
         default:
             if (reacting) {
-                omegadot_ = omega_dot_mol(k - m) * gas->molecularWeight(k - m);
+                omegadot_ = omega_dot_mol_vec[thread](k - m) * gas->molecularWeight(k - m);
             }
             else {
                 omegadot_ = 0.0;
@@ -1138,12 +1163,18 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, int k) {
 }
 
 void Solver::SetDerivedVars(){
-    gas->getPartialMolarEnthalpies(species_enthalpies_mol.data());
-    kin->getNetProductionRates(omega_dot_mol.data());
-    trans->getMixDiffCoeffs(mix_diff_coeffs.data());
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
+
+    gas->getPartialMolarEnthalpies(species_enthalpies_mol_vec[thread].data());
+    kin_vec[thread]->getNetProductionRates(omega_dot_mol_vec[thread].data());
+    trans_vec[thread]->getMixDiffCoeffs(mix_diff_coeffs_vec[thread].data());
 }
 
-double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, int k){
+double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
+
     double gammadot_;
     double rho_ = gas->density();
     double T_ = phi_(1);
@@ -1177,6 +1208,9 @@ double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, int k){
 }
 
 double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
+
     double mdot_;
     if (evaporating){
         double rho_ = gas->density();
@@ -1189,19 +1223,14 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
           if (m_d_ > 0.0 && Z_l_ > 0.0){
             double A_ = 6.0/M_PI * m_d_/rho_l;
             // energy analogy mass transfer Spalding number
-            double B_ = gas->cp_mass()*(T_ - T_l)/L_v;
-            mdot_ = -2.0*M_PI*rho_*pow(A_,1.0/3.0)*mix_diff_coeffs(fuel_idx)*log(1.0 + B_);
+            double B_ = gas_vec[thread]->cp_mass()*(T_ - T_l)/L_v;
+            mdot_ = -2.0*M_PI*rho_*pow(A_,1.0/3.0)*mix_diff_coeffs_vec[thread](fuel_idx)*log(1.0 + B_);
           } else {
             mdot_ = 0.0;
           }
         } else {
             mdot_ = 0.0;
         }
-        // The if-statement below is only useful for cases where dt is the only time step, not the outer time step
-//        if (m_d_ + dt*mdot_ < 0.0 || mdot_ > 0.0){
-//            //mdot_ = -m_d_/dt; // this is correct to first order, may cause undershoots and WONT work for CVODE
-//            mdot_ = 0.0; // this is garbage, just to get this running
-//        }
 
         // Guard against condensation
         if (mdot_ > 0.0){
@@ -1225,13 +1254,17 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
     std::cout << "  Phi = " << std::endl << Phi << std::endl;
   }
 
+  #pragma omp parallel for schedule(static,1)
   for (int i = 0; i < N; i++){
+
+    int thread = omp_get_thread_num();
+    ThermoPhase* gas = gas_vec[thread].get();
+
     u(i) = Getu(Phi, i+1);
     SetState(Phi.row(i+1));
     SetDerivedVars();
     rho_inv(i) = 1.0/gas->density();
     mdot_liq(i) = Getmdot_liq(Phi.row(i+1));
-    #pragma omp parallel for
     for (int k = 0; k < M; k++){
       c(i, k) = Getc(k);
       mu(i, k) = Getmu(k);
