@@ -51,11 +51,11 @@ private:
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
     VectorXd Getrho(const Ref<const MatrixXd>& phi);
     void SetState(const Ref<const RowVectorXd>& phi);
-    double Getc(int k);
-    double Getmu(int k);
-    double Getmu_av(int k);
-    double Getomegadot(const Ref<const RowVectorXd>& phi_, int k);
-    double GetGammadot(const Ref<const RowVectorXd>& phi_, int k);
+    double Getc(const int k);
+    double Getmu(const int k);
+    double Getmu_av(const int k);
+    double Getomegadot(const Ref<const RowVectorXd>& phi_, const int k);
+    double GetGammadot(const Ref<const RowVectorXd>& phi_, const int k);
     double Getmdot_liq(const Ref<const RowVectorXd>& phi_);
     std::string GetCoolPropString(std::string cantera_string);
     std::string GetCoolPropName(std::string cantera_name);
@@ -90,13 +90,15 @@ private:
 
     // Physics
     int M;      // number of variables per node (dimensionality)            [-]
-    int m;      // number of non-species variables per node (M - nSpecies)  [-]
+    int n_species; // number of species in mechanism [-]
+    int m;      // number of non-species variables per node (M - n_species)  [-]
 
     // Numerics
     std::string time_scheme;
     int n_omp_threads = 1;
     double av_Zl = 0.0;
     double av_md = 0.0;
+    MatrixXd Phi;
     VectorXd u;
     VectorXd rho_inv;
     MatrixXd c;
@@ -151,14 +153,18 @@ private:
     std::string mech_file;
     std::string phase_name;
     bool mech_qss = false;
-    std::unique_ptr<ThermoPhase> gas;
-    std::unique_ptr<ThermoPhase> gas_qss;
-    std::unique_ptr<Kinetics> kin;
-    VectorXd omega_dot_mol;
-    VectorXd species_enthalpies_mol;
+    std::vector<std::unique_ptr<ThermoPhase>> gas_vec;
+    std::vector<std::unique_ptr<ThermoPhase>> gas_qss_vec;
+    std::vector<std::unique_ptr<Kinetics>> kin_vec;
+    std::vector<std::unique_ptr<Transport>> trans_vec;
+    //std::unique_ptr<ThermoPhase> gas;
+    //std::unique_ptr<ThermoPhase> gas_qss;
+    //std::unique_ptr<Kinetics> kin;
+    std::vector<VectorXd> omega_dot_mol_vec;
+    std::vector<VectorXd> species_enthalpies_mol_vec;
     bool reacting;
-    std::unique_ptr<Transport> trans;
-    VectorXd mix_diff_coeffs;
+    //std::unique_ptr<Transport> trans;
+    std::vector<VectorXd> mix_diff_coeffs_vec;
     std::string X_ox; // oxidizer and fuel mass fractions for ZBilger
     std::string X_f;
 
