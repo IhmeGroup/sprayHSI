@@ -36,21 +36,22 @@ public:
     void SetIC();
     int RunSolver();
 
-  MatrixXd GetRHS(double time_, const Ref<const MatrixXd>& phi_);
+    MatrixXd GetRHS(double time_, const Ref<const MatrixXd>& phi_);
 
 private:
+    VectorXd GetSolidRHS(double time_, const Ref<const VectorXd>& T_s_);
     bool CheckStop();
     bool CheckIgnited();
     void Output();
     void OutputIgnition();
     void StepIntegrator();
-    void UpdateBCs();
-
+    void StepSolid();
     double Getu(const Ref<const MatrixXd>& Phi_, int i);
     double GetZBilger(const Ref<const MatrixXd>& Phi_, int i);
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
     VectorXd Getrho(const Ref<const MatrixXd>& phi);
     void SetState(const Ref<const RowVectorXd>& phi);
+    void SetGasQWall();
     double Getc(const int k);
     double Getmu(const int k);
     double Getmu_av(const int k);
@@ -60,10 +61,8 @@ private:
     std::string GetCoolPropString(std::string cantera_string);
     std::string GetCoolPropName(std::string cantera_name);
     int GetSpeciesIndex(std::string cantera_string);
-    void AdjustRHS(Ref<MatrixXd> RHS);
     void SetDerivedVars();
     void CheckCVODE(std::string func_name, int flag);
-
     static int cvode_RHS(double t, N_Vector y, N_Vector ydot, void *f_data);
 
     /*
@@ -72,6 +71,14 @@ private:
      * \\phi = [\V, \T, \Z_l, \m_d, \Y1, ..., \YN]
      */
     MatrixXd phi;
+
+    /*
+     * Solid-phase solution vector, \T_s, Nx1
+     */
+    VectorXd T_s;
+
+    // Wall heat flux, positive means heat flux into wall
+    double q_wall;
 
     // Computational performance
     double wall_time_per_output = 0.0;
@@ -89,9 +96,20 @@ private:
     int row_index = -1; // row index in ignition file for ignition parameter studies.
 
     // Physics
-    int M;      // number of variables per node (dimensionality)            [-]
-    int n_species; // number of species in mechanism [-]
-    int m;      // number of non-species variables per node (M - n_species)  [-]
+      // Gas and Spray
+      int M;      // number of variables per node (dimensionality)            [-]
+      int n_species; // number of species in mechanism [-]
+      int m;      // number of non-species variables per node (M - n_species)  [-]; 4 when no spray-gas slip and spray is saturated
+      bool spray_gas_slip;
+      bool saturated_spray;
+      double p_sys;
+      double a; // derived
+
+      // Solid
+      bool conjugate;
+      double lam_s; // thermal conductivity [W/m.K]
+      double rho_s; // density [kg/m3]
+      double c_s; // heat capacity [J/kg.K]
 
     // Numerics
     std::string time_scheme;
@@ -126,12 +144,22 @@ private:
 
     // Mesh
         // Space
-        VectorXd nodes;
-        VectorXd dx;
-        int N;      // number of finite difference nodes (degrees of freedom), not including BCs   [-]
-        double L;   // inlet-to-wall distance                                                      [m]
-        std::string spacing; // spacing scheme
-        double spacing_D0; // wall spacing (first dx) for geometric spacing
+
+          // Gas and spray
+          VectorXd nodes;
+          VectorXd dx;
+          int N;      // number of finite difference nodes (degrees of freedom), not including BCs   [-]
+          double L;   // inlet-to-wall distance                                                      [m]
+          std::string spacing; // spacing scheme
+          double spacing_D0; // wall spacing (first dx) for geometric spacing
+
+          // Solid
+          VectorXd nodes_s;
+          VectorXd dx_s;
+          int N_s;
+          double L_s;
+          std::string spacing_s;
+          double spacing_D0_s;
 
         // Time
         double time;
@@ -148,6 +176,7 @@ private:
     // Operators
     SparseMatrix<double> ddx;
     SparseMatrix<double> d2dx2;
+    SparseMatrix<double> d2dx2_s;
 
     // Gas
     std::string mech_file;
@@ -197,15 +226,20 @@ private:
         VectorXd Y_in; // derived
         RowVectorXd inlet_BC;
 
-        // Wall
-        std::string wall_type;
-        double T_wall;
-        bool filming;
-        RowVectorXd wall_BC;
+        // Wall_Interior
+          // Gas
+          bool match_T;
+          std::string wall_type;
+          RowVectorXd wall_interior_BC;
+          // Spray
+          bool filming;
+          // Solid
+          bool match_q;
+          double T_wall; // this is equivalent to "T_s_int"
 
-        // System
-        double p_sys;
-        double a; // derived
+
+        // Wall_Exterior
+        double T_s_ext;
 };
 
 
