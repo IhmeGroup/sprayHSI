@@ -500,6 +500,7 @@ void Solver::DerivedParams() {
     input_name = tmp_[0];
 
     // Header for output files
+    // Gas/Spray
     output_header = "TITLE = \"" + input_name + "\"";
     output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
     for (int i = 0; i < gas_vec[0]->nSpecies(); i++){
@@ -507,6 +508,11 @@ void Solver::DerivedParams() {
         if (i != gas_vec[0]->nSpecies() - 1) output_header += ",";
     }
     output_header += "\nZONE I=" + std::to_string(N+2) + ", F=POINT";
+
+    // Solid
+    solid_output_header = "TITLE = \"" + input_name + "\"";
+    solid_output_header += "\nVARIABLES = \"X_S\", \"T_S\"";
+    solid_output_header += "\nZONE I=" + std::to_string(N_s+2) + ", F=POINT";
 
     ign_header = "row_index,iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from row_index and order in which program&params were called in Python.
     for (const auto& s : output_species){
@@ -1033,7 +1039,7 @@ void Solver::Output() {
       ZBilger_(i) = GetZBilger(Phi,i);
     }
 
-    // Standard output
+    // Console output of data
     int width_ = 14;
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
@@ -1073,7 +1079,7 @@ void Solver::Output() {
     }
 
     // File output
-    // TODO for conjugate, add q_wall, T_s, T_wall
+    // Gas/Spray
     std::string output_name_;
     if (ignited && run_mode == "ignition")
       output_name_ = input_name + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_ign.dat";
@@ -1088,9 +1094,37 @@ void Solver::Output() {
         MatrixXd outmat_(N+2, M + 4); // X u_ ZBilger_ rho_ phi
         outmat_ << nodes, u_, ZBilger_, rho_, Phi;
         output_file << outmat_ << std::endl;
+        output_file << "DATASETAUXDATA qwall = \"" << q_wall << "\"" << std::endl;
+        output_file << "DATASETAUXDATA time = \"" << time << "\"" << std::endl;
         output_file.close();
     } else {
         std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
+    }
+    // Solid
+    if (conjugate) {
+      std::string solid_input_name_ = input_name + "_solid";
+      std::string output_name_;
+      if (ignited && run_mode == "ignition")
+        output_name_ = solid_input_name_ + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_ign.dat";
+      else if (!ignited && run_mode == "ignition")
+        output_name_ = solid_input_name_ + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_notign.dat";
+      else
+        output_name_ = solid_input_name_ + "_iter_" + std::to_string(iteration) + ".dat";
+      std::ofstream output_file(output_path + output_name_);
+      if (output_file.is_open()){
+        std::cout << "Writing " << output_name_ << std::endl;
+        output_file << solid_output_header << std::endl;
+        MatrixXd outmat_(N_s+2, 2); // X T_s
+        VectorXd T_s_vec_(2 + T_s.size());
+        T_s_vec_ << T_wall, T_s, T_s_ext;
+        outmat_ << nodes_s, T_s_vec_;
+        output_file << outmat_ << std::endl;
+        output_file << "DATASETAUXDATA qwall = \"" << q_wall << "\"" << std::endl;
+        output_file << "DATASETAUXDATA time = \"" << time << "\"" << std::endl;
+        output_file.close();
+      } else {
+        std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
+      }
     }
 }
 
