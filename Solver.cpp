@@ -1094,6 +1094,7 @@ void Solver::Output() {
         MatrixXd outmat_(N+2, M + 4); // X u_ ZBilger_ rho_ phi
         outmat_ << nodes, u_, ZBilger_, rho_, Phi;
         output_file << outmat_ << std::endl;
+        output_file << "DATASETAUXDATA a = \"" << a << "\"" << std::endl;
         output_file << "DATASETAUXDATA qwall = \"" << q_wall << "\"" << std::endl;
         output_file << "DATASETAUXDATA time = \"" << time << "\"" << std::endl;
         output_file.close();
@@ -1119,6 +1120,7 @@ void Solver::Output() {
         T_s_vec_ << T_wall, T_s, T_s_ext;
         outmat_ << nodes_s, T_s_vec_;
         output_file << outmat_ << std::endl;
+        output_file << "DATASETAUXDATA a = \"" << a << "\"" << std::endl;
         output_file << "DATASETAUXDATA qwall = \"" << q_wall << "\"" << std::endl;
         output_file << "DATASETAUXDATA time = \"" << time << "\"" << std::endl;
         output_file.close();
