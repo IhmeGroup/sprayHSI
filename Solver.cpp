@@ -42,33 +42,6 @@ void Solver::ReadParams(int argc, char* argv[]){
 
     // set this-> private members
 
-    // IO
-    {
-        const auto IO_ = toml::find(data, "IO");
-        verbose = toml::find(IO_, "verbose").as_boolean();
-        output_interval = toml::find(IO_, "output_interval").as_integer();
-        output_path = toml::find(IO_, "output_path").as_string();
-        output_species = toml::get<std::vector<std::string>>(toml::find(IO_, "output_species"));
-    }
-
-    // Mesh
-    {
-        const auto Mesh_ = toml::find(data, "Mesh");
-
-        // Space
-        N = toml::find(Mesh_, "Space", "N").as_integer();
-        L = toml::find(Mesh_, "Space", "L").as_floating();
-        spacing = toml::find(Mesh_, "Space", "spacing").as_string();
-        if (spacing == "geometric"){
-          spacing_D0 = toml::find(Mesh_, "Space", "wall_spacing").as_floating();
-        }
-
-        // Time
-        time_max = toml::find(Mesh_, "Time", "time_max").as_floating();
-        iteration_max = toml::find(Mesh_, "Time", "iteration_max").as_integer();
-        dt = toml::find(Mesh_, "Time", "dt").as_floating();
-    }
-
     // Run mode
     {
       const auto RunMode_ = toml::find(data, "Run_mode");
@@ -81,10 +54,91 @@ void Solver::ReadParams(int argc, char* argv[]){
       }
     }
 
+    // IO
+    {
+        const auto IO_ = toml::find(data, "IO");
+        verbose = toml::find(IO_, "verbose").as_boolean();
+        output_interval = toml::find(IO_, "output_interval").as_integer();
+        output_path = toml::find(IO_, "output_path").as_string();
+        output_species = toml::get<std::vector<std::string>>(toml::find(IO_, "output_species"));
+    }
+
     // Physics
     {
-        const auto Physics_ = toml::find(data, "Physics");
-        m = toml::find(Physics_, "m").as_integer();
+      const auto Physics_ = toml::find(data, "Physics");
+      p_sys = toml::find(Physics_, "p").as_floating();
+
+      // Gas
+      {
+        const auto Gas_ = toml::find(Physics_, "Gas");
+        mech_file = toml::find(Gas_, "mech_file").as_string();
+        phase_name = toml::find(Gas_, "phase_name").as_string();
+        mech_qss = toml::find(Gas_, "qss").as_boolean();
+        reacting = toml::find(Gas_, "reacting").as_boolean();
+        X_ox = toml::find(Gas_, "oxidizer").as_string();
+        X_f = toml::find(Gas_, "fuel").as_string();
+      }
+
+      // Spray
+      {
+        const auto Spray_ = toml::find(Physics_, "Spray");
+        spray_gas_slip = toml::find(Spray_,"spray_gas_slip").as_boolean();
+        saturated_spray = toml::find(Spray_,"saturated_spray").as_boolean();
+        evaporating = toml::find(Spray_,"evaporating").as_boolean();
+        if (evaporating)
+          X_liq = toml::find(Spray_, "species").as_string();
+      }
+
+      // Solid
+      {
+        const auto Solid_ = toml::find(Physics_, "Solid");
+        conjugate = toml::find(Solid_, "conjugate").as_boolean();
+        if (conjugate){
+          lam_s = toml::find(Solid_, "thermal_conductivity").as_floating();
+          rho_s = toml::find(Solid_, "density").as_floating();
+          c_s = toml::find(Solid_, "heat_capacity").as_floating();
+        }
+      }
+    }
+
+    // Mesh
+    {
+        const auto Mesh_ = toml::find(data, "Mesh");
+
+        // Space
+        {
+          const auto Space_ = toml::find(Mesh_, "Space");
+          // Fluid
+          {
+            const auto Fluid_ = toml::find(Space_, "Fluid");
+            N = toml::find(Fluid_, "N").as_integer();
+            L = toml::find(Fluid_, "L").as_floating();
+            spacing = toml::find(Fluid_, "spacing").as_string();
+            if (spacing == "geometric") {
+              spacing_D0 = toml::find(Fluid_, "wall_spacing").as_floating();
+            }
+          }
+          // Solid
+          {
+            const auto Solid_ = toml::find(Space_, "Solid");
+            if (conjugate) {
+              N_s = toml::find(Solid_, "N").as_integer();
+              L_s = toml::find(Solid_, "L").as_floating();
+              spacing_s = toml::find(Solid_, "spacing").as_string();
+              if (spacing_s == "geometric") {
+                spacing_D0_s = toml::find(Solid_, "wall_spacing").as_floating();
+              }
+            }
+          }
+        }
+
+        // Time
+        {
+          const auto Time_ = toml::find(Mesh_, "Time");
+          time_max = toml::find(Time_, "time_max").as_floating();
+          iteration_max = toml::find(Time_, "iteration_max").as_integer();
+          dt = toml::find(Time_, "dt").as_floating();
+        }
     }
 
     // Numerics
@@ -99,25 +153,6 @@ void Solver::ReadParams(int argc, char* argv[]){
         n_omp_threads = toml::find(Numerics_, "openMP_threads").as_integer();
         av_Zl = toml::find(Numerics_, "av_Zl").as_floating();
         av_md = toml::find(Numerics_, "av_md").as_floating();
-    }
-
-    // Gas
-    {
-        const auto Gas_ = toml::find(data, "Gas");
-        mech_file = toml::find(Gas_, "mech_file").as_string();
-        phase_name = toml::find(Gas_, "phase_name").as_string();
-        mech_qss = toml::find(Gas_, "qss").as_boolean();
-        reacting = toml::find(Gas_, "reacting").as_boolean();
-        X_ox = toml::find(Gas_, "oxidizer").as_string();
-        X_f = toml::find(Gas_, "fuel").as_string();
-    }
-
-    // Spray
-    {
-        const auto Spray_ = toml::find(data, "Spray");
-        evaporating = toml::find(Spray_,"evaporating").as_boolean();
-        if (evaporating)
-            X_liq = toml::find(Spray_, "species").as_string();
     }
 
     // BCs
@@ -142,56 +177,94 @@ void Solver::ReadParams(int argc, char* argv[]){
             m_d_in = toml::find(Spray_, "m_d").as_floating();
         }
 
-        // Wall
+        // Wall_Interior
         {
-            const auto Wall_ = toml::find(BCs_, "Wall");
+            const auto Wall_Interior_ = toml::find(BCs_, "Wall_Interior");
             // Gas
-            const auto Gas_ = toml::find(Wall_, "Gas");
-            wall_type = toml::find(Gas_, "type").as_string();
-            if (wall_type == "adiabatic") {
-                T_wall = -1.0;
-            } else if (wall_type == "isothermal") {
-                T_wall = toml::find(Gas_, "T").as_floating();
-            } else {
-                std::cerr << "Unknown Wall BC type " << wall_type << "not supported" << std::endl;
-                throw(0);
+            {
+              const auto Gas_ = toml::find(Wall_Interior_, "Gas");
+              if (conjugate) {
+                match_T = toml::find(Gas_, "match_T").as_boolean();
+              } else {
+                wall_type = toml::find(Gas_, "type").as_string();
+                if (wall_type == "adiabatic") {
+                  T_wall = -1.0;
+                } else if (wall_type == "isothermal") {
+                  T_wall = toml::find(Gas_, "T").as_floating();
+                } else {
+                  std::cerr << "Unknown Wall BC type " << wall_type << "not supported" << std::endl;
+                  throw (0);
+                }
+              }
             }
             // Spray
-            const auto Spray_ = toml::find(Wall_, "Spray");
-            filming = toml::find(Spray_, "filming").as_boolean();
+            {
+              const auto Spray_ = toml::find(Wall_Interior_, "Spray");
+              filming = toml::find(Spray_, "filming").as_boolean();
+            }
+            // Solid
+            {
+              if (conjugate) {
+                const auto Solid_ = toml::find(Wall_Interior_, "Solid");
+                match_q = toml::find(Solid_, "match_q").as_boolean();
+              }
+            }
         }
 
-        // System
-        p_sys = toml::find(BCs_, "System", "p").as_floating();
+        // Wall_Exterior
+        {
+          if (conjugate){
+            const auto Wall_Exterior_ = toml::find(BCs_, "Wall_Exterior");
+            T_s_ext = toml::find(Wall_Exterior_, "T").as_floating();
+          }
+        }
     }
 
     // ICs
     {
         const auto ICs_ = toml::find(data, "ICs");
 
-        // Restart
+        // Check if restart file used
         std::string tmp = toml::find_or<std::string>(ICs_,"restart","");
         if (tmp.empty()) {
-          // Gas
-          const auto Gas_ = toml::find(ICs_, "Gas");
-          IC_type = toml::find(Gas_, "type").as_string();
+          // No restart file
+          IC_type = toml::find(ICs_, "type").as_string();
           if (IC_type == "linear_T") {
             Tgas_0 = -1.0;
+            // Linear_T and adiabatic wall not permitted
             if (wall_type == "adiabatic") {
-              std::cerr << "IC_type " << IC_type << " and wall_type " << wall_type << " not a permitted combination"
+              std::cerr << "IC_type = " << IC_type << " and wall_type = " << wall_type << " is not a permitted combination"
                         << std::endl;
+              throw(0);
             }
           } else if (IC_type == "constant_T") {
-            Tgas_0 = toml::find(Gas_, "T").as_floating();
+            Tgas_0 = toml::find(ICs_, "T").as_floating();
+            // If constant_T, then all initial temperatures must be equal
+            // For conjugate HT, that means Tgas_0 and T_s_ext
+            if (conjugate && (Tgas_0 != T_s_ext)){
+              std::cerr << "When IC_type = " << IC_type << " and conjugate = " << conjugate << ", Tgas_0 = " << Tgas_0
+                        << " and T_s_ext = " << T_s_ext << " must be equal." << std::endl;
+              throw(0);
+            }
+            // For isothermal wall, that means Tgas_0 and T_wall
+            if (wall_type == "isothermal" && (T_wall != Tgas_0)){
+              std::cerr << "When IC_type = " << IC_type << " and wall_type = " << wall_type << ", Tgas_0 = " << Tgas_0
+                        << " and T_wall = " << T_wall << " must be equal." << std::endl;
+              throw(0);
+            }
+            // No consequences for adiabatic wall.
           } else {
-            std::cerr << "Unknown IC type " << IC_type << "not supported" << std::endl;
+            std::cerr << "Unknown IC type = " << IC_type << " not supported" << std::endl;
             throw (0);
           }
+          // Gas
+          const auto Gas_ = toml::find(ICs_, "Gas");
           X_0 = toml::find(Gas_, "X").as_string();
           // Spray
           const auto Spray_ = toml::find(ICs_, "Spray");
           Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
           m_d_0 = toml::find(Spray_, "m_d").as_floating();
+        // With restart file
         } else {
           restart_file = tmp;
         }
@@ -328,7 +401,6 @@ void Solver::SetupGas() {
     ThermoPhase* gas = gas_vec[thread].get();
 
     n_species = gas->nSpecies();
-    M = m + n_species;
 
     if (verbose) {
         gas->setState_TPX(T_in, p_sys, X_in);
@@ -343,15 +415,15 @@ void Solver::SetBCs() {
     switch (k){
       //V
       case 0:
-        wall_BC(k) = 0.0;
+        wall_interior_BC(k) = 0.0;
         break;
       // T
       case 1:
-        if (wall_type == "isothermal")
-          wall_BC(k) = T_wall;
+        if ((wall_type == "isothermal") || conjugate)
+          wall_interior_BC(k) = T_wall;
         else if (wall_type == "adiabatic")
           // 1st order one-sided difference
-          wall_BC(k) = phi(0,k);
+          wall_interior_BC(k) = phi(0, k);
         else
           throw(0);
         break;
@@ -359,17 +431,17 @@ void Solver::SetBCs() {
       // Z_l
       case 2:
         // 1st order one-sided difference in case of AV
-        wall_BC(k) = phi(0,k);
+        wall_interior_BC(k) = phi(0, k);
         break;
       // m_d
       case 3:
         // 1st order one-sided difference in case of AV
-        wall_BC(k) = phi(0,k);
+        wall_interior_BC(k) = phi(0, k);
         break;
       // Species
       default:
         // Species have no flux at wall for now... change when multiphase and filming
-        wall_BC(k) = phi(0,k);
+        wall_interior_BC(k) = phi(0, k);
     }
   }
 
@@ -428,6 +500,7 @@ void Solver::DerivedParams() {
     input_name = tmp_[0];
 
     // Header for output files
+    // Gas/Spray
     output_header = "TITLE = \"" + input_name + "\"";
     output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
     for (int i = 0; i < gas_vec[0]->nSpecies(); i++){
@@ -435,6 +508,11 @@ void Solver::DerivedParams() {
         if (i != gas_vec[0]->nSpecies() - 1) output_header += ",";
     }
     output_header += "\nZONE I=" + std::to_string(N+2) + ", F=POINT";
+
+    // Solid
+    solid_output_header = "TITLE = \"" + input_name + "\"";
+    solid_output_header += "\nVARIABLES = \"X_S\", \"T_S\"";
+    solid_output_header += "\nZONE I=" + std::to_string(N_s+2) + ", F=POINT";
 
     ign_header = "row_index,iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from row_index and order in which program&params were called in Python.
     for (const auto& s : output_species){
@@ -480,7 +558,17 @@ void Solver::DerivedParams() {
         fuel_idx = -1;
     }
 
+    // Set physics
+    if (!spray_gas_slip && saturated_spray){
+      m = 4;
+    } else {
+      std::cerr << "Spray-gas slip and/or non-saturated spray not supported." << std::endl;
+      throw(0);
+    }
+    M = m + n_species;
+
     // Resizing arrays
+    phi = MatrixXd::Zero(N,M);
     Phi = MatrixXd::Zero(N+2, M);
     u = VectorXd::Zero(N);
     rho_inv = VectorXd::Zero(N);
@@ -490,6 +578,7 @@ void Solver::DerivedParams() {
     omegadot = MatrixXd::Zero(N,M);
     mdot_liq = VectorXd::Zero(N);
     Gammadot = MatrixXd::Zero(N,M);
+    T_s = VectorXd::Zero(N_s);
 }
 
 std::string Solver::GetCoolPropName(const std::string cantera_name){
@@ -544,16 +633,26 @@ void Solver::ConstructMesh() {
     // TODO make this polymorphic
 
     /*
-     *      MESH SETUP: THERE ARE N+2 NODES, OF WHICH 2 ARE BCS
+     *      GAS/SPRAY MESH SETUP: THERE ARE N+2 NODES, OF WHICH 2 ARE BCS
      *
-     *      WALL                                                INLET
+     *      WALL_INTERIOR                                      INLET
      *      |---> +x
      *
      *      | |----------|----------|----------| ... |----------| |
      *       0   dx[0]   1  dx[1]   2   dx[2]        N  dx[N]   N+1
      *
+     *
+     *      SOLID MESH SETUP: THERE ARE N_s+2 NODES, OF WHICH 2 ARE BCS
+     *
+     *      WALL_EXTERIOR                                 WALL_INTERIOR
+     *                                                   +x  <---|
+     *
+     *      | |----------| ... |----------|----------|----------| |
+     *     Ns+1 dxs[Ns]  Ns       dxs[2]  2  dxs[1]  1  dxs[0]   0
+     *
      */
 
+    // Gas/Spray mesh
     // resize vectors
     dx = VectorXd::Zero(N+1);
     nodes = VectorXd::Zero(N+2);
@@ -563,12 +662,12 @@ void Solver::ConstructMesh() {
       dx = dx_*VectorXd::Constant(N+1,1.0);
     } else if (spacing == "geometric"){
       dx(0) = spacing_D0;
-      double r_ = GetGeometricRatio<double>(N+1,L,spacing_D0);
+      auto r_ = GetGeometricRatio<double>(N+1,L,spacing_D0);
       std::cout << "  Ratio: " << r_ << std::endl;
       for (int i=1; i<N+1; i++){
         dx(i) = pow(r_, i) * spacing_D0;
       }
-      std::cout << "  Max spacing: " << dx(N)*1000.0 << "mm" << std::endl;
+      std::cout << "  Max spacing (gas/spray): " << dx(N)*1000.0 << "mm" << std::endl;
     }
 
     // loop over node vector and fill according to spacing vector
@@ -582,12 +681,43 @@ void Solver::ConstructMesh() {
         std::cout << "nodes = \n" << nodes << std::endl;
     }
 
-    // resize matrix
-    phi = MatrixXd::Zero(N,M);
-
     // resize BCs
-    wall_BC = RowVectorXd::Zero(M);
+    wall_interior_BC = RowVectorXd::Zero(M);
     inlet_BC = RowVectorXd::Zero(M);
+
+    // Solid mesh
+    if (conjugate){
+      // resize vectors
+      dx_s = VectorXd::Zero(N_s+1);
+      nodes_s = VectorXd::Zero(N_s+2);
+
+      if (spacing_s == "constant"){
+        double dx_ = L_s/(N_s+1);
+        dx_s = dx_*VectorXd::Constant(N_s+1,1.0);
+      } else if (spacing_s == "geometric"){
+        dx_s(0) = spacing_D0_s;
+        double r_ = GetGeometricRatio<double>(N_s+1,L_s,spacing_D0_s);
+        std::cout << "  Ratio: " << r_ << std::endl;
+        for (int i=1; i<N_s+1; i++){
+          dx_s(i) = pow(r_, i) * spacing_D0_s;
+        }
+        std::cout << "  Max spacing (solid): " << dx_s(N_s)*1000.0 << "mm" << std::endl;
+      }
+
+      // loop over node vector and fill according to spacing vector
+      nodes_s(0) = 0.0;
+      nodes_s(N_s+1) = L_s;
+      for (int i = 1; i < N_s+1; i++){
+        nodes_s(i) = nodes_s(i-1) + dx_s(i-1);
+      }
+      if (verbose){
+        std::cout << "dx_s = \n" << dx_s << std::endl;
+        std::cout << "nodes_s = \n" << nodes_s << std::endl;
+      }
+
+      // resize solution vector
+      T_s = VectorXd::Zero(N_s);
+    }
 }
 
 void Solver::ConstructOperators() {
@@ -595,7 +725,7 @@ void Solver::ConstructOperators() {
 
     // TODO make this polymorphic
 
-    // Matrices are N x N+2 such that [ddx][wall_BC , phi, inlet_BC]^T = dphi/dx, N x 1.
+    // Matrices are N x N+2 such that [ddx][wall_interior_BC , phi, inlet_BC]^T = dphi/dx, N x 1.
 
     // ddx
     // 1st-order 'upwinded' (but downwinded on the grid because convection is always in -ve x direction)
@@ -638,13 +768,56 @@ void Solver::ConstructOperators() {
         std::cout << "ddx = \n" << MatrixXd(ddx) << std::endl;
         std::cout << "d2dx2 = \n" << MatrixXd(d2dx2) << std::endl;
     }
+
+    if (conjugate){
+      // d2dx2
+      // 2nd-order central
+      // generalized to non-uniform grids (my derivation)
+
+      // resize matrix
+      d2dx2_s.resize(N_s,N_s+2);
+      d2dx2_s.reserve(3*N_s);
+
+      // fill matrix
+      for (int i = 0; i < N_s; i++){
+        for (int j = 0; j < N_s+2; j++){
+          if (i+1 == j){
+            d2dx2_s.insert(i,j-1) = (4.0 * dx_s(i+1))/((dx_s(i)*dx_s(i) + dx_s(i+1)*dx_s(i+1))*(dx_s(i)+dx_s(i+1)));
+            d2dx2_s.insert(i,j) = -4.0/(dx_s(i)*dx_s(i) + dx_s(i+1)*dx_s(i+1));
+            d2dx2_s.insert(i,j+1) = (4.0 * dx_s(i))/((dx_s(i)*dx_s(i) + dx_s(i+1)*dx_s(i+1))*(dx_s(i)+dx_s(i+1)));
+          }
+        }
+      }
+
+      if (verbose){
+        std::cout << "d2dx2_s = \n" << MatrixXd(d2dx2_s) << std::endl;
+      }
+    }
 }
 
 void Solver::SetIC() {
     std::cout << "Solver::SetIC()" << std::endl;
 
     if (restart_file.empty()) {
-      std::cout << "> Restart using initial conditions" << std::endl;
+      std::cout << "> Restart from initial conditions" << std::endl;
+
+      if (conjugate){
+        // estimate steady-state T_wall if conjugate HT and linear_T IC
+        if (IC_type == "linear_T"){
+          int thread = omp_get_thread_num();
+          ThermoPhase* gas_ = gas_vec[thread].get();
+          Transport* trans_ = trans_vec[thread].get();
+          T_wall = GetTWall<double>(gas_,trans_,T_in,T_s_ext,p_sys,X_0,L,L_s,lam_s);
+        // Steady-state T_wall = Tgas_0 = T_s_ext if conjugate HT and constant_T IC
+        } else if (IC_type == "constant_T") {
+          T_wall = Tgas_0;
+          assert(T_wall == T_s_ext);
+        }
+        std::cout << "> T_wall_0 = " << std::fixed << std::setprecision(1) << T_wall << std::endl;
+      }
+       // in non-conjugate cases, T_wall is provided explicitly or is unnecessary (i.e. adiabatic wall)
+
+      // Gas/spray
       // loop over all variables
       for (int k = 0; k < M; k++) {
         switch (k) {
@@ -652,7 +825,7 @@ void Solver::SetIC() {
           case 0:
             phi.col(k) = VectorXd::Zero(N);
             break;
-            // T
+          // T
           case 1:
             if (IC_type == "linear_T") {
               double T_ = T_wall;
@@ -662,16 +835,13 @@ void Solver::SetIC() {
               }
             } else if (IC_type == "constant_T") {
               phi.col(k) = Tgas_0 * VectorXd::Constant(N, 1.0);
-            } else {
-              // should have already caught this "unknown type" error
-              throw (0);
             }
             break;
-            // Z_l
+          // Z_l
           case 2:
             phi.col(k) = Z_l_0 * VectorXd::Constant(N, 1.0);
             break;
-            // m_d
+          // m_d
           case 3:
             // Set to very small number to ensure T and Z_l spray source terms don't become undefined
             phi.col(k) = m_d_0 * VectorXd::Constant(N, 1.0);
@@ -680,10 +850,22 @@ void Solver::SetIC() {
             phi.col(k) = Y_0(k - m) * VectorXd::Constant(N, 1.0);
         }
       }
+
+      // Solid
+      if (conjugate){
+        // always linear between T_wall and T_s_ext, constant_T is just a special case of linear_T for solid b.c. no inlet
+        double T_ = T_wall;
+        for (int i = 0; i < N_s; i++) {
+          T_ += (T_s_ext - T_wall) / L_s * dx_s[i];
+          T_s(i) = T_;
+        }
+      }
+
       // Set time and iteration to initial condition
       iteration = 0;
       time = 0.0;
     } else {
+      // TODO add restart capability for files with conjugate HT and wall heat flux output
       std::cout << "> Restart from file: " << restart_file << std::endl;
       // Set IC using restart file
       // ASSUME no change in BCs NOR variables NOR (outer) dt
@@ -803,6 +985,10 @@ void Solver::SetIC() {
 
     if (verbose){
         std::cout << "phi_0 = \n" << phi << std::endl;
+        if (conjugate){
+          std::cout << "T_wall_0 = " << T_wall << std::endl;
+          std::cout << "T_s_0 = \n" << T_s << std::endl;
+        }
     }
 
     // Set BCs to match ICs
@@ -833,16 +1019,16 @@ void Solver::Output() {
     std::cout << "---------------------------------------------------------" << std::endl;
     std::cout << "  Solver::Output()" << std::endl;
     std::cout << "  iteration = " << iteration << std::endl;
-    std::cout << "  time = " << time << "[s]" << std::endl;
+    std::cout << "  time = " << std::scientific << std::setprecision(2) << time << "[s]" << std::endl;
     std::cout << "  wall-time-per-iteration = " << wall_time_per_output / output_interval << " [s]" << std::endl;
     if (time_scheme == "CVODE"){
       std::cout << "  ODE steps = " << cvode_nsteps << ", RHS evals = " << cvode_nRHSevals
         << ", Jac evals = " << cvode_nJacevals << ", last dt = " << cvode_last_dt << std::endl;
     }
-
-    // Create Phi = [wall_BC, phi, inlet_BC]^T
-    MatrixXd Phi(wall_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
-    Phi << wall_BC, phi, inlet_BC;
+    std::cout << "  q_wall = " << q_wall << " [W/m2.K]" << std::endl;
+    // Create Phi = [wall_interior_BC, phi, inlet_BC]^T
+    MatrixXd Phi(wall_interior_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
+    Phi << wall_interior_BC, phi, inlet_BC;
 
     // Derived quantities
     VectorXd rho_ = Getrho(Phi);
@@ -853,7 +1039,7 @@ void Solver::Output() {
       ZBilger_(i) = GetZBilger(Phi,i);
     }
 
-    // Standard output
+    // Console output of data
     int width_ = 14;
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
@@ -878,8 +1064,22 @@ void Solver::Output() {
       }
       std::cout << std::endl;
     }
+    if (conjugate) {
+      std::cout << "T_wall = " << std::fixed << std::setprecision(1) << T_wall << " [K]" << std::endl;
+      std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x_s [m]"
+        << std::setw(width_) << "T_s [K]"  << std::endl;
+      VectorXd T_s_vec_(2 + T_s.size());
+      T_s_vec_ << T_wall, T_s, T_s_ext;
+      for (int i = 0; i < N_s+2; i++) {
+        std::cout << std::left << std::setw(width_) << i; // i
+        std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << nodes_s(i); // x_s
+        std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << T_s_vec_(i); // T_s
+        std::cout << std::endl;
+      }
+    }
 
     // File output
+    // Gas/Spray
     std::string output_name_;
     if (ignited && run_mode == "ignition")
       output_name_ = input_name + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_ign.dat";
@@ -894,9 +1094,39 @@ void Solver::Output() {
         MatrixXd outmat_(N+2, M + 4); // X u_ ZBilger_ rho_ phi
         outmat_ << nodes, u_, ZBilger_, rho_, Phi;
         output_file << outmat_ << std::endl;
+        output_file << "DATASETAUXDATA a = \"" << a << "\"" << std::endl;
+        output_file << "DATASETAUXDATA qwall = \"" << q_wall << "\"" << std::endl;
+        output_file << "DATASETAUXDATA time = \"" << time << "\"" << std::endl;
         output_file.close();
     } else {
         std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
+    }
+    // Solid
+    if (conjugate) {
+      std::string solid_input_name_ = input_name + "_solid";
+      std::string output_name_;
+      if (ignited && run_mode == "ignition")
+        output_name_ = solid_input_name_ + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_ign.dat";
+      else if (!ignited && run_mode == "ignition")
+        output_name_ = solid_input_name_ + "_iter_" + std::to_string(iteration) + "_row_" + std::to_string(row_index) + "_notign.dat";
+      else
+        output_name_ = solid_input_name_ + "_iter_" + std::to_string(iteration) + ".dat";
+      std::ofstream output_file(output_path + output_name_);
+      if (output_file.is_open()){
+        std::cout << "Writing " << output_name_ << std::endl;
+        output_file << solid_output_header << std::endl;
+        MatrixXd outmat_(N_s+2, 2); // X T_s
+        VectorXd T_s_vec_(2 + T_s.size());
+        T_s_vec_ << T_wall, T_s, T_s_ext;
+        outmat_ << nodes_s, T_s_vec_;
+        output_file << outmat_ << std::endl;
+        output_file << "DATASETAUXDATA a = \"" << a << "\"" << std::endl;
+        output_file << "DATASETAUXDATA qwall = \"" << q_wall << "\"" << std::endl;
+        output_file << "DATASETAUXDATA time = \"" << time << "\"" << std::endl;
+        output_file.close();
+      } else {
+        std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
+      }
     }
 }
 
@@ -920,9 +1150,9 @@ void Solver::OutputIgnition() {
     ign_file_ << ign_header << std::endl;
   }
 
-  // Create Phi = [wall_BC, phi, inlet_BC]^T
-  MatrixXd Phi(wall_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
-  Phi << wall_BC, phi, inlet_BC;
+  // Create Phi = [wall_interior_BC, phi, inlet_BC]^T
+  MatrixXd Phi(wall_interior_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
+  Phi << wall_interior_BC, phi, inlet_BC;
 
   std::ofstream ign_file_(ign_file_path_, std::ios_base::app);
   if (ign_file_.is_open()){
@@ -976,6 +1206,23 @@ void Solver::StepIntegrator() {
       std::cerr << "Temporal scheme " << time_scheme << " not recognized." << std::endl;
       throw(0);
   }
+}
+
+void Solver::StepSolid() {
+  // Using q_wall from gas
+
+  // Step solid forward with Neumann BC on gas side, Dirichlet on outside
+  // TVD RK3 (Gottlieb and Shu, with time evaluations from here: http://www.cosmo-model.org/content/consortium/userSeminar/seminar2006/6_advanced_numerics_seminar/Baldauf_Runge_Kutta.pdf)
+  MatrixXd RHSn_ = GetSolidRHS(time, T_s);
+  MatrixXd Ts1_ = T_s + dt * RHSn_;
+  MatrixXd RHS1_ = GetSolidRHS(time + dt, Ts1_);
+  MatrixXd Ts2_ = (3.0 / 4.0) * T_s + (1.0 / 4.0) * Ts1_ + (1.0 / 4.0) * dt * RHS1_;
+  MatrixXd RHS2_ = GetSolidRHS(time + dt / 2.0, Ts2_);
+  T_s = (1.0 / 3.0) * T_s + (2.0 / 3.0) * Ts2_ + (2.0 / 3.0) * dt * RHS2_;
+
+  // Set T_wall from solid gas-side temperature
+  T_wall = T_s(0) + q_wall * dx_s(0) / lam_s; // 1st order one-sided difference
+
 }
 
 double Solver::Getu(const Ref<const MatrixXd>& Phi_, int i){
@@ -1058,6 +1305,21 @@ void Solver::SetState(const Ref<const RowVectorXd>& phi_){
     int thread = omp_get_thread_num();
     ThermoPhase* gas = gas_vec[thread].get();
     gas->setState_TPY(phi_(1),p_sys,phi_.tail(gas->nSpecies()).data());
+}
+
+void Solver::SetGasQWall() {
+  int thread = omp_get_thread_num();
+  Transport* trans_ = trans_vec[thread].get();
+  SetState(phi.row(0));
+  double lam_g_ = trans_->thermalConductivity();
+
+  // Create Phi = [wall_interior_BC, phi, inlet_BC]^T
+  Phi << wall_interior_BC, phi, inlet_BC;
+  q_wall = lam_g_ * (ddx * Phi.col(1))(0);
+
+  if (verbose)
+    std::cout << "q_wall = " << q_wall << "W/m2" << std::endl;
+
 }
 
 double Solver::Getc(const int k) {
@@ -1246,8 +1508,8 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
   // Loop on BCs
   SetBCs();
 
-  // Create Phi = [wall_BC, phi, inlet_BC]^T
-  Phi << wall_BC, phi_, inlet_BC;
+  // Create Phi = [wall_interior_BC, phi, inlet_BC]^T
+  Phi << wall_interior_BC, phi_, inlet_BC;
 
   if (verbose) {
     std::cout << "GetRHS(t = " << time_ << ", phi)" << std::endl;
@@ -1295,11 +1557,36 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
   return conv + diff + src_gas + src_spray;
 }
 
+VectorXd Solver::GetSolidRHS(double time_, const Ref<const VectorXd>& T_s_) {
+  // Set Solid BC from q_wall
+  double T_w_ = T_s_(0) + q_wall * dx_s(0) / lam_s; // 1st order one-sided difference
+
+  // Construct solution vector with BCs
+  VectorXd T_s_vec_(2 + T_s_.size());
+  T_s_vec_ << T_w_, T_s_, T_s_ext;
+
+  if (verbose) {
+    std::cout << "GetSolidRHS(t = " << time_ << ", T_s_)" << std::endl;
+    std::cout << "  T_s_vec_ = " << std::endl << T_s_vec_ << std::endl;
+  }
+
+  // Get solid RHS
+  VectorXd RHS_ = (lam_s/(rho_s * c_s)) * d2dx2_s * T_s_vec_;
+
+  if (verbose)
+    std::cout << "SolidRHS = " << std::endl << RHS_ << std::endl; // here, first cell RHS is ~-2e5.
+
+  return RHS_;
+}
+
 int Solver::RunSolver() {
     std::cout << "Solver::RunSolver()" << std::endl;
 
     try {
         while(!CheckStop()){
+
+            // Compute the gas-side wall heat flux
+            SetGasQWall();
 
             // Outputs
             if (!(iteration % output_interval)){
@@ -1314,6 +1601,9 @@ int Solver::RunSolver() {
             // Integrate ODE
             std::chrono::time_point<std::chrono::system_clock> tic = std::chrono::system_clock::now();
             StepIntegrator();
+            if (conjugate){
+              StepSolid();
+            }
             std::chrono::duration<double> diff = std::chrono::system_clock::now() - tic;
             wall_time_per_output += diff.count();
 
