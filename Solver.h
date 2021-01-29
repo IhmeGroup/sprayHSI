@@ -44,6 +44,7 @@ private:
     bool CheckIgnited();
     void Output();
     void OutputIgnition();
+    void Clipping();
     void StepIntegrator();
     void StepSolid();
     double Getu(const Ref<const MatrixXd>& Phi_, int i);
@@ -55,12 +56,13 @@ private:
     double Getc(const int k);
     double Getmu(const int k);
     double Getmu_av(const int k);
-    double Getomegadot(const Ref<const RowVectorXd>& phi_, const int k);
+    double Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot_liq_, const int k);
     double GetGammadot(const Ref<const RowVectorXd>& phi_, const int k);
     double Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     double GetDd(const double m_d_);
     double GetNu(const Ref<const RowVectorXd>& phi_);
-    double Getf2(const Ref<const RowVectorXd>& phi_);
+    double GetSh(const Ref<const RowVectorXd>& phi_);
+    double Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     double GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     std::string GetCoolPropString(std::string cantera_string);
     std::string GetCoolPropName(std::string cantera_name);

@@ -17,6 +17,8 @@
 #include "Meshing.h"
 #include "omp.h"
 
+#define NEAR_ONE 0.9999999999
+
 Solver::Solver() {
     std::cout << "Solver::Solver()" << std::endl;
 }
@@ -517,7 +519,7 @@ void Solver::DerivedParams() {
     // Header for output files
     // Gas/Spray
     output_header = "TITLE = \"" + input_name + "\"";
-    output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
+    output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\", \"Td\",";
     for (int i = 0; i < gas_vec[0]->nSpecies(); i++){
         output_header += " \"Y_" + gas_vec[0]->speciesName(i) + "\"";
         if (i != gas_vec[0]->nSpecies() - 1) output_header += ",";
@@ -529,7 +531,7 @@ void Solver::DerivedParams() {
     solid_output_header += "\nVARIABLES = \"X_S\", \"T_S\"";
     solid_output_header += "\nZONE I=" + std::to_string(N_s+2) + ", F=POINT";
 
-    ign_header = "row_index,iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from row_index and order in which program&params were called in Python.
+    ign_header = "row_index,iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md,Td"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from row_index and order in which program&params were called in Python.
     for (const auto& s : output_species){
       ign_header += ",Y_" + s;
     }
@@ -1066,7 +1068,7 @@ void Solver::Output() {
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
       << std::setw(width_) << "T [K]" << std::setw(width_) << "ZBilger" << std::setw(width_) << "Z_l" << std::setw(width_)
-      << "m_d" << std::setw(width_) << "T_d" << std::setw(width_);
+      << "m_d" << std::setw(width_) << "T_d [K]" << std::setw(width_);
     for (const auto& s : output_species){
       std::cout << std::left << std::setw(width_) << "Y_" + s;
     }
@@ -1101,7 +1103,7 @@ void Solver::Output() {
       }
     }
 
-    // File output // TODO add T_d to file output
+    // File output
     // Gas/Spray
     std::string output_name_;
     if (ignited && run_mode == "ignition")
@@ -1193,7 +1195,8 @@ void Solver::OutputIgnition() {
     phi(max_row_,0) << "," <<
     phi(max_row_,1) << "," <<
     phi(max_row_,2) << "," <<
-    phi(max_row_,3);
+    phi(max_row_,3) << "," <<
+    phi(max_row_,4);
     for (const auto& s : output_species){
       ign_file_ << "," << Phi(max_row_,m + GetSpeciesIndex(s));
     }
@@ -1418,32 +1421,38 @@ double Solver::Getmu_av(const int k) {
 }
 
 double Solver::GetDd(const double m_d_) {
-  return pow(m_d_/rho_l, 1.0/3.0);
+  if (m_d_ > 0.0)
+    return pow(m_d_/rho_l, 1.0/3.0);
+  else
+    return 0.0;
 }
 
 double Solver::GetNu(const Ref<const RowVectorXd>& phi_) {
   return 2.0; // TODO upgrade this when slip velocity added
 }
 
-double Solver::Getf2(const Ref<const RowVectorXd>& phi_){
-  // Model M7, Miller et al. 1998
-//  int thread = omp_get_thread_num();
-//  ThermoPhase* gas = gas_vec[thread].get();
-//  Transport* trans = trans_vec[thread].get();
-//
-//  double rho_ = gas->density();
-//  double cp_ = gas->cp_mass();
-//  double lambda_ = trans->thermalConductivity();
-//  double m_d_ = phi_(3);
-//
-//  double beta = -((rho_ * cp_ * pow(GetDd(m_d_), 2))/(12.0 * lambda_)) * (mdot_d / m_d_);
-//  double G = beta / (exp(beta) - 1.0);
-//  double f2 = G;
-//  return f2;
-  return 1.0;
+double Solver::GetSh(const Ref<const RowVectorXd>& phi_) {
+  return 2.0; // TODO upgrade this when slip velocity added
 }
 
-double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const int k) {
+double Solver::Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_){
+  // Model M7, Miller et al. 1998
+  int thread = omp_get_thread_num();
+  ThermoPhase* gas = gas_vec[thread].get();
+  Transport* trans = trans_vec[thread].get();
+
+  double rho_ = gas->density();
+  double cp_ = gas->cp_mass();
+  double lambda_ = trans->thermalConductivity();
+  double m_d_ = phi_(3);
+
+  double beta = -((rho_ * cp_ * pow(GetDd(m_d_), 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // this is with current time step's mdot_liq
+  double G = beta / (exp(beta) - 1.0);
+  double f2 = G;
+  return f2;
+}
+
+double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot_liq_, const int k) {
     int thread = omp_get_thread_num();
     ThermoPhase* gas = gas_vec[thread].get();
     Transport* trans = trans_vec[thread].get();
@@ -1460,14 +1469,19 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const int k) {
         case 0:
             omegadot_ = rho_inf * pow(a, 2) - rho_ * pow(V_, 2);
             break;
-        // T: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar
+        // T: rxn: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar, spray: - (rho*Z_l/m_d) * m_d * c_l * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
         case 1:
-            if (reacting) {
-                omegadot_ = -species_enthalpies_mol_vec[thread].dot(omega_dot_mol_vec[thread]);
-            }
-            else
-                omegadot_ = 0.0;
-            break;
+          if (GetDd(m_d_) > D_min && T_d_ < T_l) {
+            omegadot_ = -rho_ * Z_l_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * trans->thermalConductivity()) /
+                        (rho_l * pow(GetDd(m_d_), 2)) * (T_ - T_d_);
+          } else
+            omegadot_ = 0.0;
+          if (reacting) {
+              omegadot_ += -species_enthalpies_mol_vec[thread].dot(omega_dot_mol_vec[thread]);
+          }
+          else
+              omegadot_ += 0.0;
+          break;
         // Z_l: 0
         case 2:
             omegadot_ = 0.0;
@@ -1478,8 +1492,8 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const int k) {
             break;
         // T_d: + rho * f2 * (Nu/(3Pr)) * (theta_1/tau_d) * (T - T_d) = rho * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
         case 4:
-          if (GetDd(m_d_) > D_min)
-            omegadot_ = rho_ * Getf2(phi_) * (6.0 * GetNu(phi_) * trans->thermalConductivity())/(c_l * rho_l * pow(GetDd(m_d_), 2)) * (T_ - T_d_);
+          if (GetDd(m_d_) > D_min && T_d_ < T_l)
+            omegadot_ = rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * trans->thermalConductivity())/(c_l * rho_l * pow(GetDd(m_d_), 2)) * (T_ - T_d_);
           else
             omegadot_ = 0.0;
           break;
@@ -1521,7 +1535,7 @@ double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
             break;
         // T: -(rho*Z_l/m_d) * (-1) * (cp * (T - T_d) + L_v)
         case 1:
-            gammadot_ = - (rho_ * Z_l_ / m_d_) * -1.0 * (gas->cp_mass() * (T_ - T_d_) + L_v);
+            gammadot_ = - (rho_ * Z_l_ / m_d_) * -1.0 * (gas->cp_mass() * (T_ - T_d_) + L_v); // TODO should be vapour c_p
             break;
         // Z_l: + (rho*Z_l/m_d)
         case 2:
@@ -1546,12 +1560,11 @@ double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
 }
 
 double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_) {
-  double NEAR_ONE = 0.9999999999;
   int thread = omp_get_thread_num();
   ThermoPhase* gas = gas_vec[thread].get();
   Transport* trans = trans_vec[thread].get();
 
-  double T_d_ = phi_(4);
+  double T_d_ = std::min(T_l, phi_(4));
   double M_m = gas->meanMolecularWeight();
   double M_f = gas->molecularWeight(fuel_idx);
   // TODO use 1/3 mixing rule to compute the following four quantities (requires resetting state to droplet surface/vapour)
@@ -1561,6 +1574,7 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   double mu_ = trans->viscosity();
   double m_d_ = phi_(3);
   double D_d_ = GetDd(m_d_);
+  // Miller et al 1998, model M7
   double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
   double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8.314/M_f ,0.5)) / (1.0 * Sc * p_sys);
   double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // use previous time step's mdot_liq, as suggested by Miller
@@ -1587,26 +1601,15 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot
         double m_d_ = phi_(3);
         double D_d_ = GetDd(m_d_);
         // TODO single component fuel assumed!!!
-        // TODO simple Heaviside function evaporation law assumed!!!
-        if (T_ > T_l){
-          if (m_d_ > 0.0 && Z_l_ > 0.0 && D_d_ > D_min){
-            // energy analogy mass transfer Spalding number
-//            double A_ = 6.0/M_PI * m_d_/rho_l;
-//            double B_ = gas_vec[thread]->cp_mass()*(T_ - T_l)/L_v;
-//            mdot_ = -2.0*M_PI*rho_*pow(A_,1.0/3.0)*mix_diff_coeffs_vec[thread](fuel_idx)*log(1.0 + B_);
-
-            // Miller et al 1998, Model M7
-            double Sh = 2.0; // TODO upgrade with slip velocity
-            double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
-            double tau_d = rho_l * pow(D_d_, 2)/(18.0 * mu_);
-            mdot_ = - Sh/(3.0 * Sc) * (m_d_/tau_d) * GetHM(phi_, mdot_liq_);
-          } else {
-            mdot_ = 0.0;
-          }
+        if (m_d_ > 0.0 && Z_l_ > 0.0 && D_d_ > D_min){
+          // Miller et al 1998, Model M7
+          double Sh = GetSh(phi_);
+          double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
+          double tau_d = rho_l * pow(D_d_, 2)/(18.0 * mu_);
+          mdot_ = - Sh/(3.0 * Sc) * (m_d_/tau_d) * GetHM(phi_, mdot_liq_);
         } else {
-            mdot_ = 0.0;
+          mdot_ = 0.0;
         }
-
         // Guard against condensation
         if (mdot_ > 0.0){
           mdot_ = 0.0;
@@ -1644,7 +1647,7 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
       c(i, k) = Getc(k);
       mu(i, k) = Getmu(k);
       mu_av(i, k) = Getmu_av(k);
-      omegadot(i, k) = Getomegadot(Phi.row(i+1), k);
+      omegadot(i, k) = Getomegadot(Phi.row(i+1), mdot_liq(i), k);
       Gammadot(i,k) = GetGammadot(Phi.row(i+1), k);
     }
   }
@@ -1692,6 +1695,21 @@ VectorXd Solver::GetSolidRHS(double time_, const Ref<const VectorXd>& T_s_) {
   return RHS_;
 }
 
+void Solver::Clipping(){
+  // Enforce T_d < NEAR_ONE * T_l
+  if (phi.col(4).maxCoeff() > NEAR_ONE * T_l) {
+    std::cout << "  Clipping T_d at t = " << time << "s" << std::endl;
+
+    phi.col(4) = phi.col(4).cwiseMin(NEAR_ONE * T_l);
+
+    // Re-initialize CVode, since solution has changed
+    if (time_scheme == "CVODE") {
+      Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M) = phi;
+      CheckCVODE("CVodeReInit", CVodeReInit(cvode_mem, time, cvode_y));
+    }
+  }
+}
+
 int Solver::RunSolver() {
     std::cout << "Solver::RunSolver()" << std::endl;
 
@@ -1719,6 +1737,9 @@ int Solver::RunSolver() {
             }
             std::chrono::duration<double> diff = std::chrono::system_clock::now() - tic;
             wall_time_per_output += diff.count();
+
+            // Limiters
+            Clipping();
 
             // Update counters
             iteration++;
