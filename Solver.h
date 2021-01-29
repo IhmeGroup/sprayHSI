@@ -14,6 +14,7 @@
 #include "cantera/kinetics/GasQSSKinetics.h"
 #include "cantera/transport.h"
 #include "Eigen/Dense"
+#include "Liquid.h"
 
 using namespace Eigen;
 using namespace Cantera;
@@ -29,6 +30,7 @@ public:
     void ReadParams(int argc, char* argv[]);
     void SetupSolver();
     void SetupGas();
+    void SetupLiquid();
     void SetBCs();
     void DerivedParams();
     void ConstructMesh();
@@ -59,13 +61,11 @@ private:
     double Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot_liq_, const int k);
     double GetGammadot(const Ref<const RowVectorXd>& phi_, const int k);
     double Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
-    double GetDd(const double m_d_);
+    double GetDd(const double m_d_, const double T_d_);
     double GetNu(const Ref<const RowVectorXd>& phi_);
     double GetSh(const Ref<const RowVectorXd>& phi_);
     double Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     double GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
-    std::string GetCoolPropString(std::string cantera_string);
-    std::string GetCoolPropName(std::string cantera_name);
     int GetSpeciesIndex(std::string cantera_string);
     void SetDerivedVars();
     void CheckCVODE(std::string func_name, int flag);
@@ -206,11 +206,10 @@ private:
     std::string X_f;
 
     // Spray
+    std::unique_ptr<Liquid> liq;
     std::string X_liq;
     double T_l;
     double L_v;
-    double rho_l;
-    double c_l;
     int fuel_idx;
     bool evaporating;
 

@@ -16,6 +16,7 @@
 #include "RHSFunctor.h"
 #include "Meshing.h"
 #include "omp.h"
+#include "CoolPropLiquid.h"
 
 #define NEAR_ONE 0.9999999999
 
@@ -414,6 +415,10 @@ void Solver::SetupGas() {
     }
 }
 
+void::Solver::SetupLiquid(){
+  liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq) );
+}
+
 void Solver::SetBCs() {
   // Wall
   for (int k = 0; k < M; k++){
@@ -565,15 +570,11 @@ void Solver::DerivedParams() {
     // TODO change for multicomponent spray
     // TODO assuming saturated liquid for now
     if (evaporating) {
-        T_l = CoolProp::PropsSI("T", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
-        L_v = CoolProp::PropsSI("HMASS", "P", p_sys, "Q", 1.0, GetCoolPropString(X_liq)) -
-              CoolProp::PropsSI("HMASS", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
-        rho_l = CoolProp::PropsSI("DMASS", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
-        c_l = CoolProp::PropsSI("CPMASS", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
+        T_l = liq->T_sat(p_sys);
+        L_v = liq->L_v(p_sys);
         fuel_idx = GetSpeciesIndex(X_liq);
     } else {
-        T_l = L_v = rho_l = 0.0;
-        c_l = -1;
+        T_l = L_v = 0.0;
         fuel_idx = -1;
     }
 
@@ -598,42 +599,6 @@ void Solver::DerivedParams() {
     mdot_liq = VectorXd::Zero(N);
     Gammadot = MatrixXd::Zero(N,M);
     T_s = VectorXd::Zero(N_s);
-}
-
-std::string Solver::GetCoolPropName(const std::string cantera_name){
-    std::map<std::string, std::string> cantera_to_CoolProp = {
-            {"NC12H26","NC12H26"},
-            {"N-C12H26","NC12H26"},
-            {"KERO_LUCHE","NC12H26"}
-    };
-    // check if it's in the map, if not throw an error. CoolProp fails silently if it doesn't recognize the name
-    if (cantera_to_CoolProp.count(cantera_name)){
-        return cantera_to_CoolProp[cantera_name];
-    } else {
-        std::cerr << "No known conversion of Cantera species " << cantera_name << " to a CoolProp species." << std::endl;
-        throw(0);
-    }
-}
-
-std::string Solver::GetCoolPropString(std::string cantera_string){
-    std::string cool_prop_name = "";
-    // Start with something like "A:0.7,B:0.3"
-    std::vector<std::string> name_val_pairs;
-    boost::split(name_val_pairs, cantera_string, [](char c){return c == ',';});
-    // Now have ["A:0.7","B:0.3"]
-    for (auto& pair : name_val_pairs){
-        // Start with "A:0.7"
-        std::vector<std::string> split_pair;
-        boost::split(split_pair, pair, [](char c){return c == ':';});
-        // Now have ["A","0.7"]
-        split_pair[0] = GetCoolPropName(split_pair[0]);
-        // Now have ["a","0.7"]
-        pair = split_pair[0] + "[" + split_pair[1] + "]";
-        // Now have "a[0.7]"
-        cool_prop_name += pair + "&";
-    }
-    cool_prop_name = cool_prop_name.substr(0,cool_prop_name.length()-1);
-    return cool_prop_name;
 }
 
 int Solver::GetSpeciesIndex(std::string cantera_string){
@@ -1420,9 +1385,9 @@ double Solver::Getmu_av(const int k) {
   return mu_av_;
 }
 
-double Solver::GetDd(const double m_d_) {
+double Solver::GetDd(const double m_d_, const double T_d_) {
   if (m_d_ > 0.0)
-    return pow(m_d_/rho_l, 1.0/3.0);
+    return pow(m_d_/liq->rho_liq(T_d_, p_sys), 1.0/3.0);
   else
     return 0.0;
 }
@@ -1445,8 +1410,9 @@ double Solver::Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   double cp_ = gas->cp_mass();
   double lambda_ = trans->thermalConductivity();
   double m_d_ = phi_(3);
+  double T_d_ = phi_(4);
 
-  double beta = -((rho_ * cp_ * pow(GetDd(m_d_), 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // this is with current time step's mdot_liq
+  double beta = -((rho_ * cp_ * pow(GetDd(m_d_, T_d_), 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // this is with current time step's mdot_liq
   double G = beta / (exp(beta) - 1.0);
   double f2 = G;
   return f2;
@@ -1471,9 +1437,9 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
             break;
         // T: rxn: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar, spray: - (rho*Z_l/m_d) * m_d * c_l * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
         case 1:
-          if (GetDd(m_d_) > D_min && T_d_ < T_l) {
+          if (GetDd(m_d_, T_d_) > D_min && T_d_ < T_l) {
             omegadot_ = -rho_ * Z_l_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * trans->thermalConductivity()) /
-                        (rho_l * pow(GetDd(m_d_), 2)) * (T_ - T_d_);
+                        (liq->rho_liq(T_d_, p_sys) * pow(GetDd(m_d_, T_d_), 2)) * (T_ - T_d_);
           } else
             omegadot_ = 0.0;
           if (reacting) {
@@ -1492,8 +1458,8 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
             break;
         // T_d: + rho * f2 * (Nu/(3Pr)) * (theta_1/tau_d) * (T - T_d) = rho * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
         case 4:
-          if (GetDd(m_d_) > D_min && T_d_ < T_l)
-            omegadot_ = rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * trans->thermalConductivity())/(c_l * rho_l * pow(GetDd(m_d_), 2)) * (T_ - T_d_);
+          if (GetDd(m_d_, T_d_) > D_min && T_d_ < T_l)
+            omegadot_ = rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * trans->thermalConductivity())/(liq->cp_liq(T_d_, p_sys) * liq->rho_liq(T_d_, p_sys) * pow(GetDd(m_d_, T_d_), 2)) * (T_ - T_d_);
           else
             omegadot_ = 0.0;
           break;
@@ -1547,7 +1513,7 @@ double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
             break;
         // T_d: + (rho * L_v) / (c_l * m_d)
         case 4:
-          gammadot_ = (rho_ * L_v) / (c_l * m_d_);
+          gammadot_ = (rho_ * L_v) / (liq->cp_liq(T_d_, p_sys) * m_d_);
           break;
         // Y_k: - (rho*Z_l/m_d) * delta_{k,f}
         default:
@@ -1573,12 +1539,12 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   double lambda_ = trans->thermalConductivity();
   double mu_ = trans->viscosity();
   double m_d_ = phi_(3);
-  double D_d_ = GetDd(m_d_);
+  double D_d_ = GetDd(m_d_, T_d_);
   // Miller et al 1998, model M7
   double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
   double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8.314/M_f ,0.5)) / (1.0 * Sc * p_sys);
   double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // use previous time step's mdot_liq, as suggested by Miller
-  double chi_seq = CoolProp::PropsSI("P", "T", T_d_, "Q", 1.0, GetCoolPropString(X_liq))/p_sys;
+  double chi_seq = liq->p_sat(T_d_)/p_sys;
   double chi_sneq = chi_seq - (L_k/(D_d_/2.0)) * beta;
   double theta_2 = M_m/M_f;
   double Y_sneq = std::min(NEAR_ONE, chi_sneq/(chi_sneq + (1.0 - chi_sneq)*theta_2));
@@ -1599,13 +1565,14 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot
         double T_ = phi_(1);
         double Z_l_ = phi_(2);
         double m_d_ = phi_(3);
-        double D_d_ = GetDd(m_d_);
+        double T_d_ = phi_(4);
+        double D_d_ = GetDd(m_d_, T_d_);
         // TODO single component fuel assumed!!!
         if (m_d_ > 0.0 && Z_l_ > 0.0 && D_d_ > D_min){
           // Miller et al 1998, Model M7
           double Sh = GetSh(phi_);
           double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
-          double tau_d = rho_l * pow(D_d_, 2)/(18.0 * mu_);
+          double tau_d = liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)/(18.0 * mu_);
           mdot_ = - Sh/(3.0 * Sc) * (m_d_/tau_d) * GetHM(phi_, mdot_liq_);
         } else {
           mdot_ = 0.0;
