@@ -18,6 +18,8 @@ public:
   double rho_satvap(double p) const;
   double cp_liq(double T, double p) const;
   double cp_satvap(double p) const;
+  double lambda_satvap(double p) const;
+  double mu_satvap(double p) const;
 
 private:
   std::string GetCoolPropName(const std::string cantera_name);

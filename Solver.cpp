@@ -1413,8 +1413,7 @@ double Solver::Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   double T_d_ = phi_(4);
 
   double beta = -((rho_ * cp_ * pow(GetDd(m_d_, T_d_), 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // this is with current time step's mdot_liq
-  double G = beta / (exp(beta) - 1.0);
-  double f2 = G;
+  double f2 = (abs(beta) < 1e-12) ? 1.0 : beta / (exp(beta) - 1.0);
   return f2;
 }
 
@@ -1531,25 +1530,29 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   Transport* trans = trans_vec[thread].get();
 
   double T_d_ = std::min(T_l, phi_(4));
-  double M_m = gas->meanMolecularWeight();
-  double M_f = gas->molecularWeight(fuel_idx);
-  // TODO use 1/3 mixing rule to compute the following four quantities (requires resetting state to droplet surface/vapour)
-  double cp_ = gas->cp_mass();
-  double rho_ = gas->density();
-  double lambda_ = trans->thermalConductivity();
-  double mu_ = trans->viscosity();
+  double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
   double m_d_ = phi_(3);
   double D_d_ = GetDd(m_d_, T_d_);
+  double M_m = gas->meanMolecularWeight();
+  double M_f = gas->molecularWeight(fuel_idx);
+  double theta_2 = M_m/M_f;
+  double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+  double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+  // reference mass fraction (1/3 rule)
+  double Yref_ = (2.0/3.0) * Y_seq + (1.0/3.0) * Y_g_;
+  // reference properties
+  double cp_ = Yref_ * liq->cp_satvap(p_sys) + (1.0 - Yref_) * gas->cp_mass();
+  double rho_ = Yref_ * liq->rho_satvap(p_sys) + (1.0 - Yref_) * gas->density();
+  double lambda_ = Yref_ * liq->lambda_satvap(p_sys) + (1.0 - Yref_) * trans->viscosity();
+  double mu_ = Yref_ * liq->mu_satvap(p_sys) + (1.0 - Yref_) * trans->viscosity();
   // Miller et al 1998, model M7
   double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
-  double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8.314/M_f ,0.5)) / (1.0 * Sc * p_sys);
-  double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // use previous time step's mdot_liq, as suggested by Miller
-  double chi_seq = liq->p_sat(T_d_)/p_sys;
+  double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8314.0/M_f ,0.5)) / (1.0 * Sc * p_sys);
+  // use previous time step's mdot_liq, as suggested by Miller
+  double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_);
   double chi_sneq = chi_seq - (L_k/(D_d_/2.0)) * beta;
-  double theta_2 = M_m/M_f;
   double Y_sneq = std::min(NEAR_ONE, chi_sneq/(chi_sneq + (1.0 - chi_sneq)*theta_2));
-  double Y_g = std::min(NEAR_ONE, phi_(fuel_idx + m));
-  double B_Mneq = (Y_sneq - Y_g)/(1.0 - Y_sneq);
+  double B_Mneq = (Y_sneq - Y_g_)/(1.0 - Y_sneq);
   return log(1.0 + B_Mneq);
 }
 

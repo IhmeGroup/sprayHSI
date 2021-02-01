@@ -20,6 +20,8 @@ public:
   virtual double rho_satvap(double p) const = 0;
   virtual double cp_liq(double T, double p) const = 0;
   virtual double cp_satvap(double p) const = 0;
+  virtual double lambda_satvap(double p) const = 0;
+  virtual double mu_satvap(double p) const = 0;
 
 protected:
   const std::string X_liq;

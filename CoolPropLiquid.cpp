@@ -83,3 +83,11 @@ double CoolPropLiquid::cp_liq(double T, double p) const {
 double CoolPropLiquid::cp_satvap(double p) const {
   return CoolProp::PropsSI("CPMASS", "P", p, "Q", 1.0, coolprop_string);
 }
+
+double CoolPropLiquid::lambda_satvap(double p) const {
+  return CoolProp::PropsSI("CONDUCTIVITY", "P", p, "Q", 1.0, coolprop_string);
+}
+
+double CoolPropLiquid::mu_satvap(double p) const {
+  return CoolProp::PropsSI("VISCOSITY", "P", p, "Q", 1.0, coolprop_string);
+}
