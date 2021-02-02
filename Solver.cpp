@@ -1539,7 +1539,7 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   ThermoPhase* gas = gas_vec[thread].get();
   Transport* trans = trans_vec[thread].get();
 
-  double T_d_ = std::min(T_l, phi_(4));
+  double T_d_ = std::min(NEAR_ONE*T_l, phi_(4));
   double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
   double m_d_ = phi_(3);
   double D_d_ = GetDd(m_d_, T_d_);
@@ -1551,12 +1551,12 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   // reference mass fraction (1/3 rule)
   double Yref_ = (2.0/3.0) * Y_seq + (1.0/3.0) * Y_g_;
   // reference properties
-double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
+  double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
   double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
-  double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->viscosity();
+  double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
   double mu_ = Yref_ * liq->mu_satvap(T_d_) + (1.0 - Yref_) * trans->viscosity();
   // Miller et al 1998, model M7
-  double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
+  double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx)); //TODO use reference properties?
   double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8314.0/M_f ,0.5)) / (1.0 * Sc * p_sys);
   // use previous time step's mdot_liq, as suggested by Miller
   double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_);
