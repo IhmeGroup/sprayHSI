@@ -17,6 +17,7 @@
 #include "Meshing.h"
 #include "omp.h"
 #include "CoolPropLiquid.h"
+#include "FitLiquid.h"
 
 #define NEAR_ONE 0.9999999999
 
@@ -86,9 +87,11 @@ void Solver::ReadParams(int argc, char* argv[]){
       {
         const auto Spray_ = toml::find(Physics_, "Spray");
         spray_gas_slip = toml::find(Spray_,"spray_gas_slip").as_boolean();
-        evaporating = toml::find(Spray_,"evaporating").as_boolean();
-        if (evaporating)
+        evaporating = toml::find(Spray_,"evaporating").as_boolean(); // TODO change to simply "spray" true/false. There is no use case for spray with no evap.
+        if (evaporating) {
           X_liq = toml::find(Spray_, "species").as_string();
+          liq_type = toml::find(Spray_, "properties").as_string();
+        }
       }
 
       // Solid
@@ -416,7 +419,14 @@ void Solver::SetupGas() {
 }
 
 void::Solver::SetupLiquid(){
-  liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq) );
+  if (liq_type == "CoolProp") {
+    liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq));
+  } else if (liq_type == "fit") {
+    liq = std::unique_ptr<Liquid>(new FitLiquid(X_liq));
+  } else {
+    std::cerr << "Unknown liquid type '" << liq_type << "'" << std::endl;
+    throw(0);
+  }
 }
 
 void Solver::SetBCs() {
@@ -571,7 +581,7 @@ void Solver::DerivedParams() {
     // TODO assuming saturated liquid for now
     if (evaporating) {
         T_l = liq->T_sat(p_sys);
-        L_v = liq->L_v(p_sys);
+        L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
     } else {
         T_l = L_v = 0.0;
@@ -1541,10 +1551,10 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   // reference mass fraction (1/3 rule)
   double Yref_ = (2.0/3.0) * Y_seq + (1.0/3.0) * Y_g_;
   // reference properties
-  double cp_ = Yref_ * liq->cp_satvap(p_sys) + (1.0 - Yref_) * gas->cp_mass();
-  double rho_ = Yref_ * liq->rho_satvap(p_sys) + (1.0 - Yref_) * gas->density();
-  double lambda_ = Yref_ * liq->lambda_satvap(p_sys) + (1.0 - Yref_) * trans->viscosity();
-  double mu_ = Yref_ * liq->mu_satvap(p_sys) + (1.0 - Yref_) * trans->viscosity();
+double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
+  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+  double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->viscosity();
+  double mu_ = Yref_ * liq->mu_satvap(T_d_) + (1.0 - Yref_) * trans->viscosity();
   // Miller et al 1998, model M7
   double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
   double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8314.0/M_f ,0.5)) / (1.0 * Sc * p_sys);

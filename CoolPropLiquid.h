@@ -13,13 +13,13 @@ public:
   ~CoolPropLiquid();
   double T_sat(double p) const;
   double p_sat(double T) const;
-  double L_v(double p) const;
+  double L_v(double T) const;
   double rho_liq(double T, double p) const;
-  double rho_satvap(double p) const;
+  double rho_satvap(double T) const;
   double cp_liq(double T, double p) const;
-  double cp_satvap(double p) const;
-  double lambda_satvap(double p) const;
-  double mu_satvap(double p) const;
+  double cp_satvap(double T) const;
+  double lambda_satvap(double T) const;
+  double mu_satvap(double T) const;
 
 private:
   std::string GetCoolPropName(const std::string cantera_name);

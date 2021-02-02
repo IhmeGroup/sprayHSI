@@ -55,9 +55,9 @@ double CoolPropLiquid::p_sat(double T) const {
   return CoolProp::PropsSI("P", "T", T, "Q", 0.0, coolprop_string);
 }
 
-double CoolPropLiquid::L_v(double p) const {
-  return CoolProp::PropsSI("HMASS", "P", p, "Q", 1.0, coolprop_string) -
-         CoolProp::PropsSI("HMASS", "P", p, "Q", 0.0, coolprop_string);
+double CoolPropLiquid::L_v(double T) const {
+  return CoolProp::PropsSI("HMASS", "T", T, "Q", 1.0, coolprop_string) -
+         CoolProp::PropsSI("HMASS", "T", T, "Q", 0.0, coolprop_string);
 }
 
 double CoolPropLiquid::rho_liq(double T, double p) const {
@@ -68,8 +68,8 @@ double CoolPropLiquid::rho_liq(double T, double p) const {
     return CoolProp::PropsSI("DMASS", "T", T, "P", p, coolprop_string);
 }
 
-double CoolPropLiquid::rho_satvap(double p) const {
-  return CoolProp::PropsSI("DMASS", "P", p, "Q", 1.0, coolprop_string);
+double CoolPropLiquid::rho_satvap(double T) const {
+  return CoolProp::PropsSI("DMASS", "T", T, "Q", 1.0, coolprop_string);
 }
 
 double CoolPropLiquid::cp_liq(double T, double p) const {
@@ -80,14 +80,18 @@ double CoolPropLiquid::cp_liq(double T, double p) const {
     return CoolProp::PropsSI("CPMASS", "T", T, "P", p, coolprop_string);
 }
 
-double CoolPropLiquid::cp_satvap(double p) const {
-  return CoolProp::PropsSI("CPMASS", "P", p, "Q", 1.0, coolprop_string);
+double CoolPropLiquid::cp_satvap(double T) const {
+  return CoolProp::PropsSI("CPMASS", "T", T, "Q", 1.0, coolprop_string);
 }
 
-double CoolPropLiquid::lambda_satvap(double p) const {
-  return CoolProp::PropsSI("CONDUCTIVITY", "P", p, "Q", 1.0, coolprop_string);
+double CoolPropLiquid::lambda_satvap(double T) const {
+  return CoolProp::PropsSI("CONDUCTIVITY", "T", T, "Q", 1.0, coolprop_string);
 }
 
-double CoolPropLiquid::mu_satvap(double p) const {
-  return CoolProp::PropsSI("VISCOSITY", "P", p, "Q", 1.0, coolprop_string);
+double CoolPropLiquid::mu_satvap(double T) const {
+  return CoolProp::PropsSI("VISCOSITY", "T", T, "Q", 1.0, coolprop_string);
+}
+
+CoolPropLiquid::~CoolPropLiquid(){
+  std::cout << "CoolPropLiquid::~CoolPropLiquid()" << std::endl;
 }

@@ -20,5 +20,5 @@ add_definitions(-DNO_FMTLIB)
 include_directories(${CANTERA_ROOT}/include ${SUNDIALS_ROOT}/include ${EIGEN3_ROOT}/include/eigen3 ${BOOST_ROOT}/include ${TOML_ROOT} ${UTILITIES_ROOT}/CoolProp/include)
 link_directories(${CANTERA_ROOT}/lib ${SUNDIALS_ROOT}/lib ${UTILITIES_ROOT}/CoolProp/build ${CLANG_LLVM_ROOT}/lib)
 
-add_executable(Hiemenz_solver main.cpp Solver.cpp Solver.h RHSFunctor.cpp RHSFunctor.h Meshing.h Liquid.h CoolPropLiquid.cpp CoolPropLiquid.h)
+add_executable(Hiemenz_solver main.cpp Solver.cpp Solver.h RHSFunctor.cpp RHSFunctor.h Meshing.h Liquid.h CoolPropLiquid.cpp CoolPropLiquid.h FitLiquid.cpp FitLiquid.h)
 target_link_libraries(Hiemenz_solver cantera sundials_cvodes sundials_ida sundials_nvecserial CoolProp)

@@ -110,6 +110,7 @@ private:
       bool spray_gas_slip;
       double p_sys;
       double a; // derived
+      std::string liq_type; // liquid properties class to be used
 
       // Solid
       bool conjugate;
