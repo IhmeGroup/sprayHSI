@@ -159,7 +159,6 @@ void Solver::ReadParams(int argc, char* argv[]){
         av_Zl = toml::find(Numerics_, "av_Zl").as_floating();
         av_md = toml::find(Numerics_, "av_md").as_floating();
         av_Td = toml::find(Numerics_, "av_Td").as_floating();
-        D_min = toml::find(Numerics_, "D_min").as_floating();
     }
 
     // BCs
@@ -583,6 +582,7 @@ void Solver::DerivedParams() {
         T_l = liq->T_sat(p_sys);
         L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
+        D_min = 30.0 * dt; // TODO figure out why this factor works
     } else {
         T_l = L_v = 0.0;
         fuel_idx = -1;
