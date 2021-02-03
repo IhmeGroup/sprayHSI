@@ -65,6 +65,7 @@ private:
     double GetNu(const Ref<const RowVectorXd>& phi_);
     double GetSh(const Ref<const RowVectorXd>& phi_);
     double Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
+    double GetBeta(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     double GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     int GetSpeciesIndex(std::string cantera_string);
     void SetDerivedVars();

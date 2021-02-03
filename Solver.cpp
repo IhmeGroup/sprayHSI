@@ -1410,19 +1410,36 @@ double Solver::GetSh(const Ref<const RowVectorXd>& phi_) {
   return 2.0; // TODO upgrade this when slip velocity added
 }
 
-double Solver::Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_){
-  // Model M7, Miller et al. 1998
+double Solver::GetBeta(const Ref<const RowVectorXd>& phi_, const double mdot_liq_) {
   int thread = omp_get_thread_num();
   ThermoPhase* gas = gas_vec[thread].get();
   Transport* trans = trans_vec[thread].get();
 
-  double rho_ = gas->density();
-  double cp_ = gas->cp_mass();
-  double lambda_ = trans->thermalConductivity();
+  double T_d_ = std::min(NEAR_ONE*T_l, phi_(4));
+  double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
   double m_d_ = phi_(3);
-  double T_d_ = phi_(4);
+  double D_d_ = GetDd(m_d_, T_d_);
 
-  double beta = -((rho_ * cp_ * pow(GetDd(m_d_, T_d_), 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // this is with current time step's mdot_liq
+  double M_m = gas->meanMolecularWeight();
+  double M_f = gas->molecularWeight(fuel_idx);
+  double theta_2 = M_m/M_f;
+  double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+  double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+  // reference mass fraction (1/3 rule)
+  double Yref_ = (2.0/3.0) * Y_seq + (1.0/3.0) * Y_g_;
+  // reference properties
+  double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
+  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+  double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+  double mu_ = Yref_ * liq->mu_satvap(T_d_) + (1.0 - Yref_) * trans->viscosity();
+
+  double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // previous time step's mdot_liq
+  return beta;
+}
+
+double Solver::Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_){
+  // Model M7, Miller et al. 1998
+  double beta = GetBeta(phi_, mdot_liq_);
   double f2 = (abs(beta) < 1e-12) ? 1.0 : beta / (exp(beta) - 1.0);
   return f2;
 }
@@ -1559,7 +1576,7 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx)); //TODO use reference properties?
   double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8314.0/M_f ,0.5)) / (1.0 * Sc * p_sys);
   // use previous time step's mdot_liq, as suggested by Miller
-  double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_);
+  double beta = GetBeta(phi_, mdot_liq_);
   double chi_sneq = chi_seq - (L_k/(D_d_/2.0)) * beta;
   double Y_sneq = std::min(NEAR_ONE, chi_sneq/(chi_sneq + (1.0 - chi_sneq)*theta_2));
   double B_Mneq = (Y_sneq - Y_g_)/(1.0 - Y_sneq);
@@ -1622,7 +1639,7 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
     SetState(Phi.row(i+1));
     SetDerivedVars();
     rho_inv(i) = 1.0/gas->density();
-    mdot_liq(i) = Getmdot_liq(Phi.row(i+1), mdot_liq(i));
+    double mdot_liq_ = Getmdot_liq(Phi.row(i+1), mdot_liq(i));
     for (int k = 0; k < M; k++){
       c(i, k) = Getc(k);
       mu(i, k) = Getmu(k);
@@ -1630,6 +1647,7 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
       omegadot(i, k) = Getomegadot(Phi.row(i+1), mdot_liq(i), k);
       Gammadot(i,k) = GetGammadot(Phi.row(i+1), k);
     }
+    mdot_liq(i) = mdot_liq_;
   }
 
   // TODO make AV smarter to only activate on strong gradients
