@@ -418,6 +418,7 @@ void Solver::SetupGas() {
 }
 
 void::Solver::SetupLiquid(){
+  std::cout << "Solver::SetupLiquid()" << std::endl;
   if (liq_type == "CoolProp") {
     liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq));
   } else if (liq_type == "fit") {
@@ -518,6 +519,7 @@ void Solver::SetBCs() {
 
 void Solver::DerivedParams() {
 
+    std::cout << "Solver::DerivedParams()" << std::endl;
     int thread = omp_get_thread_num();
 
     // Input file name without path
@@ -583,6 +585,7 @@ void Solver::DerivedParams() {
         L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
         D_min = 30.0 * dt; // TODO figure out why this factor works
+        std::cout << "> D_min = " << D_min << std::endl;
     } else {
         T_l = L_v = 0.0;
         fuel_idx = -1;
@@ -1033,9 +1036,11 @@ void Solver::Output() {
     VectorXd rho_ = Getrho(Phi);
     VectorXd u_(VectorXd::Zero(N+2));
     VectorXd ZBilger_(VectorXd::Zero(N+2));
+    VectorXd D_d_(VectorXd::Zero(N+2));
     for (int i = 0; i < N+2; i++){
       u_(i) = Getu(Phi,i);
       ZBilger_(i) = GetZBilger(Phi,i);
+      D_d_(i) = GetDd(Phi(i,3), Phi(i,4));
     }
 
     // Console output of data
@@ -1043,7 +1048,7 @@ void Solver::Output() {
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
       << std::setw(width_) << "T [K]" << std::setw(width_) << "ZBilger" << std::setw(width_) << "Z_l" << std::setw(width_)
-      << "m_d" << std::setw(width_) << "T_d [K]" << std::setw(width_);
+      << "D_d [m]" << std::setw(width_) << "T_d [K]" << std::setw(width_);
     for (const auto& s : output_species){
       std::cout << std::left << std::setw(width_) << "Y_" + s;
     }
@@ -1057,7 +1062,7 @@ void Solver::Output() {
       std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,1); // T
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << ZBilger_(i); // ZBilger
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,2); // Z_l
-      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,3); // m_d
+      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << D_d_(i); // D_d
       std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,4); // T_d
       for (const auto& s : output_species){
         std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,m + GetSpeciesIndex(s)); // Y
