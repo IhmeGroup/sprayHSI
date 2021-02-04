@@ -16,6 +16,10 @@
 #include "RHSFunctor.h"
 #include "Meshing.h"
 #include "omp.h"
+#include "CoolPropLiquid.h"
+#include "FitLiquid.h"
+
+#define NEAR_ONE 0.9999999999
 
 Solver::Solver() {
     std::cout << "Solver::Solver()" << std::endl;
@@ -83,10 +87,11 @@ void Solver::ReadParams(int argc, char* argv[]){
       {
         const auto Spray_ = toml::find(Physics_, "Spray");
         spray_gas_slip = toml::find(Spray_,"spray_gas_slip").as_boolean();
-        saturated_spray = toml::find(Spray_,"saturated_spray").as_boolean();
-        evaporating = toml::find(Spray_,"evaporating").as_boolean();
-        if (evaporating)
+        evaporating = toml::find(Spray_,"evaporating").as_boolean(); // TODO change to simply "spray" true/false. There is no use case for spray with no evap.
+        if (evaporating) {
           X_liq = toml::find(Spray_, "species").as_string();
+          liq_type = toml::find(Spray_, "properties").as_string();
+        }
       }
 
       // Solid
@@ -153,6 +158,7 @@ void Solver::ReadParams(int argc, char* argv[]){
         n_omp_threads = toml::find(Numerics_, "openMP_threads").as_integer();
         av_Zl = toml::find(Numerics_, "av_Zl").as_floating();
         av_md = toml::find(Numerics_, "av_md").as_floating();
+        av_Td = toml::find(Numerics_, "av_Td").as_floating();
     }
 
     // BCs
@@ -175,6 +181,7 @@ void Solver::ReadParams(int argc, char* argv[]){
             const auto Spray_ = toml::find(Inlet_, "Spray");
             Z_l_in = toml::find(Spray_, "Z_l").as_floating();
             m_d_in = toml::find(Spray_, "m_d").as_floating();
+            T_d_in = toml::find(Spray_, "T_d").as_floating();
         }
 
         // Wall_Interior
@@ -264,6 +271,7 @@ void Solver::ReadParams(int argc, char* argv[]){
           const auto Spray_ = toml::find(ICs_, "Spray");
           Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
           m_d_0 = toml::find(Spray_, "m_d").as_floating();
+          T_d_0 = toml::find(Spray_, "T_d").as_floating();
         // With restart file
         } else {
           restart_file = tmp;
@@ -409,6 +417,18 @@ void Solver::SetupGas() {
     }
 }
 
+void::Solver::SetupLiquid(){
+  std::cout << "Solver::SetupLiquid()" << std::endl;
+  if (liq_type == "CoolProp") {
+    liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq));
+  } else if (liq_type == "fit") {
+    liq = std::unique_ptr<Liquid>(new FitLiquid(X_liq));
+  } else {
+    std::cerr << "Unknown liquid type '" << liq_type << "'" << std::endl;
+    throw(0);
+  }
+}
+
 void Solver::SetBCs() {
   // Wall
   for (int k = 0; k < M; k++){
@@ -438,9 +458,14 @@ void Solver::SetBCs() {
         // 1st order one-sided difference in case of AV
         wall_interior_BC(k) = phi(0, k);
         break;
+      // T_d
+      case 4:
+        // 1st order one-sided difference in case of AV
+        wall_interior_BC(k) = phi(0, k);
+        break;
       // Species
       default:
-        // Species have no flux at wall for now... change when multiphase and filming
+        // TODO Species have no flux at wall for now... change when multiphase and filming
         wall_interior_BC(k) = phi(0, k);
     }
   }
@@ -470,6 +495,13 @@ void Solver::SetBCs() {
         else
           inlet_BC(k) = 1.0e-300;
         break;
+        // m_d
+      case 4:
+        if (evaporating)
+          inlet_BC(k) = T_d_in;
+        else
+          inlet_BC(k) = 300.0;
+        break;
         // Species
       default:
         inlet_BC(k) = Y_in(k-m);
@@ -487,6 +519,7 @@ void Solver::SetBCs() {
 
 void Solver::DerivedParams() {
 
+    std::cout << "Solver::DerivedParams()" << std::endl;
     int thread = omp_get_thread_num();
 
     // Input file name without path
@@ -502,7 +535,7 @@ void Solver::DerivedParams() {
     // Header for output files
     // Gas/Spray
     output_header = "TITLE = \"" + input_name + "\"";
-    output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\",";
+    output_header += "\nVARIABLES = \"X\", \"u\", \"ZBilger\", \"RHO\", \"V\", \"T\", \"Zl\", \"md\", \"Td\",";
     for (int i = 0; i < gas_vec[0]->nSpecies(); i++){
         output_header += " \"Y_" + gas_vec[0]->speciesName(i) + "\"";
         if (i != gas_vec[0]->nSpecies() - 1) output_header += ",";
@@ -514,7 +547,7 @@ void Solver::DerivedParams() {
     solid_output_header += "\nVARIABLES = \"X_S\", \"T_S\"";
     solid_output_header += "\nZONE I=" + std::to_string(N_s+2) + ", F=POINT";
 
-    ign_header = "row_index,iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from row_index and order in which program&params were called in Python.
+    ign_header = "row_index,iteration,time,x,dx_avg,u,ZBilger,rho,V,T,Zl,md,Td"; // TODO add the overridden parameters, since these are the parameter study parameters and are useful to have in the param study's (single) ignition file. Can still infer from row_index and order in which program&params were called in Python.
     for (const auto& s : output_species){
       ign_header += ",Y_" + s;
     }
@@ -548,21 +581,21 @@ void Solver::DerivedParams() {
     // TODO change for multicomponent spray
     // TODO assuming saturated liquid for now
     if (evaporating) {
-        T_l = CoolProp::PropsSI("T", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
-        L_v = CoolProp::PropsSI("HMASS", "P", p_sys, "Q", 1.0, GetCoolPropString(X_liq)) -
-              CoolProp::PropsSI("HMASS", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
-        rho_l = CoolProp::PropsSI("DMASS", "P", p_sys, "Q", 0.0, GetCoolPropString(X_liq));
+        T_l = liq->T_sat(p_sys);
+        L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
+        D_min = 30.0 * dt; // TODO figure out why this factor works
+        std::cout << "> D_min = " << D_min << std::endl;
     } else {
-        T_l = L_v = rho_l = 0.0;
+        T_l = L_v = 0.0;
         fuel_idx = -1;
     }
 
     // Set physics
-    if (!spray_gas_slip && saturated_spray){
-      m = 4;
+    if (!spray_gas_slip){
+      m = 5;
     } else {
-      std::cerr << "Spray-gas slip and/or non-saturated spray not supported." << std::endl;
+      std::cerr << "Spray-gas slip not supported." << std::endl;
       throw(0);
     }
     M = m + n_species;
@@ -579,42 +612,6 @@ void Solver::DerivedParams() {
     mdot_liq = VectorXd::Zero(N);
     Gammadot = MatrixXd::Zero(N,M);
     T_s = VectorXd::Zero(N_s);
-}
-
-std::string Solver::GetCoolPropName(const std::string cantera_name){
-    std::map<std::string, std::string> cantera_to_CoolProp = {
-            {"NC12H26","NC12H26"},
-            {"N-C12H26","NC12H26"},
-            {"KERO_LUCHE","NC12H26"}
-    };
-    // check if it's in the map, if not throw an error. CoolProp fails silently if it doesn't recognize the name
-    if (cantera_to_CoolProp.count(cantera_name)){
-        return cantera_to_CoolProp[cantera_name];
-    } else {
-        std::cerr << "No known conversion of Cantera species " << cantera_name << " to a CoolProp species." << std::endl;
-        throw(0);
-    }
-}
-
-std::string Solver::GetCoolPropString(std::string cantera_string){
-    std::string cool_prop_name = "";
-    // Start with something like "A:0.7,B:0.3"
-    std::vector<std::string> name_val_pairs;
-    boost::split(name_val_pairs, cantera_string, [](char c){return c == ',';});
-    // Now have ["A:0.7","B:0.3"]
-    for (auto& pair : name_val_pairs){
-        // Start with "A:0.7"
-        std::vector<std::string> split_pair;
-        boost::split(split_pair, pair, [](char c){return c == ':';});
-        // Now have ["A","0.7"]
-        split_pair[0] = GetCoolPropName(split_pair[0]);
-        // Now have ["a","0.7"]
-        pair = split_pair[0] + "[" + split_pair[1] + "]";
-        // Now have "a[0.7]"
-        cool_prop_name += pair + "&";
-    }
-    cool_prop_name = cool_prop_name.substr(0,cool_prop_name.length()-1);
-    return cool_prop_name;
 }
 
 int Solver::GetSpeciesIndex(std::string cantera_string){
@@ -846,6 +843,11 @@ void Solver::SetIC() {
             // Set to very small number to ensure T and Z_l spray source terms don't become undefined
             phi.col(k) = m_d_0 * VectorXd::Constant(N, 1.0);
             break;
+          // T_d
+          case 4:
+            phi.col(k) = T_d_0 * VectorXd::Constant(N, 1.0);
+            break;
+          // Y_k
           default:
             phi.col(k) = Y_0(k - m) * VectorXd::Constant(N, 1.0);
         }
@@ -1034,9 +1036,11 @@ void Solver::Output() {
     VectorXd rho_ = Getrho(Phi);
     VectorXd u_(VectorXd::Zero(N+2));
     VectorXd ZBilger_(VectorXd::Zero(N+2));
+    VectorXd D_d_(VectorXd::Zero(N+2));
     for (int i = 0; i < N+2; i++){
       u_(i) = Getu(Phi,i);
       ZBilger_(i) = GetZBilger(Phi,i);
+      D_d_(i) = GetDd(Phi(i,3), Phi(i,4));
     }
 
     // Console output of data
@@ -1044,7 +1048,7 @@ void Solver::Output() {
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
       << std::setw(width_) << "T [K]" << std::setw(width_) << "ZBilger" << std::setw(width_) << "Z_l" << std::setw(width_)
-      << "m_d" << std::setw(width_);
+      << "D_d [m]" << std::setw(width_) << "T_d [K]" << std::setw(width_);
     for (const auto& s : output_species){
       std::cout << std::left << std::setw(width_) << "Y_" + s;
     }
@@ -1058,7 +1062,8 @@ void Solver::Output() {
       std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,1); // T
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << ZBilger_(i); // ZBilger
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,2); // Z_l
-      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,3); // m_d
+      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << D_d_(i); // D_d
+      std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,4); // T_d
       for (const auto& s : output_species){
         std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,m + GetSpeciesIndex(s)); // Y
       }
@@ -1170,7 +1175,8 @@ void Solver::OutputIgnition() {
     phi(max_row_,0) << "," <<
     phi(max_row_,1) << "," <<
     phi(max_row_,2) << "," <<
-    phi(max_row_,3);
+    phi(max_row_,3) << "," <<
+    phi(max_row_,4);
     for (const auto& s : output_species){
       ign_file_ << "," << Phi(max_row_,m + GetSpeciesIndex(s));
     }
@@ -1339,45 +1345,53 @@ double Solver::Getc(const int k) {
 }
 
 double Solver::Getmu(const int k) {
-    int thread = omp_get_thread_num();
-    Transport* trans = trans_vec[thread].get();
+  int thread = omp_get_thread_num();
+  Transport* trans = trans_vec[thread].get();
 
-    double mu_;
-    switch (k){
-        // V
-        case 0:
-          mu_ = trans->viscosity();
-            break;
-        // T
-        case 1:
-          mu_ = trans->thermalConductivity();
-            break;
-        // Z_l
-        case 2:
-          mu_ = 0.0;
-            break;
-        // m_d
-        case 3:
-          mu_ = 0.0;
-            break;
-        // Species
-        default:
-          mu_ = mix_diff_coeffs_vec[thread](k - m);
-    }
-    return mu_;
+  double mu_;
+  switch (k){
+    // V
+    case 0:
+      mu_ = trans->viscosity();
+      break;
+    // T
+    case 1:
+      mu_ = trans->thermalConductivity();
+      break;
+    // Z_l
+    case 2:
+      mu_ = 0.0;
+      break;
+    // m_d
+    case 3:
+      mu_ = 0.0;
+      break;
+    // m_d
+    case 4:
+      mu_ = 0.0;
+      break;
+    // Species
+    default:
+      mu_ = mix_diff_coeffs_vec[thread](k - m);
+  }
+  return mu_;
 }
 
 double Solver::Getmu_av(const int k) {
   // Artificial viscosity
   double mu_av_;
   switch (k){
-      // Z_l
+    // Z_l
     case 2:
       mu_av_ = av_Zl; // TODO make this physics-based
       break;
-      // m_d
+    // m_d
     case 3:
       mu_av_ = av_md; // TODO make this physics-based
+      break;
+    // T_d
+    case 4:
+      mu_av_ = av_Td; // TODO make this physics-based
       break;
       // Other quantities receive no artificial viscosity
     default:
@@ -1386,32 +1400,117 @@ double Solver::Getmu_av(const int k) {
   return mu_av_;
 }
 
-double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const int k) {
+double Solver::GetDd(const double m_d_, const double T_d_) {
+  if (m_d_ > 0.0)
+    return pow(m_d_/(M_PI / 6.0 * liq->rho_liq(T_d_, p_sys)), 1.0/3.0);
+  else
+    return 0.0;
+}
+
+double Solver::GetNu(const Ref<const RowVectorXd>& phi_) {
+  return 2.0; // TODO upgrade this when slip velocity added
+}
+
+double Solver::GetSh(const Ref<const RowVectorXd>& phi_) {
+  return 2.0; // TODO upgrade this when slip velocity added
+}
+
+double Solver::GetBeta(const Ref<const RowVectorXd>& phi_, const double mdot_liq_) {
+  int thread = omp_get_thread_num();
+  ThermoPhase* gas = gas_vec[thread].get();
+  Transport* trans = trans_vec[thread].get();
+
+  double T_d_ = std::min(NEAR_ONE*T_l, phi_(4));
+  double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
+  double m_d_ = phi_(3);
+  double D_d_ = GetDd(m_d_, T_d_);
+
+  double M_m = gas->meanMolecularWeight();
+  double M_f = gas->molecularWeight(fuel_idx);
+  double theta_2 = M_m/M_f;
+  double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+  double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+  // reference mass fraction (1/3 rule)
+  double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
+  // reference properties
+  double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
+//  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+  double rho_ = Yref_ * liq->rho_vap(T_d_, p_sys) + (1.0 - Yref_) * gas->density();
+  double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+  double mu_ = Yref_ * liq->mu_satvap(T_d_, p_sys) + (1.0 - Yref_) * trans->viscosity();
+
+  double beta = -((liq->rho_liq(T_d_, p_sys) * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // previous time step's mdot_liq
+  return beta;
+}
+
+double Solver::Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_){
+  // Model M7, Miller et al. 1998
+  double beta = GetBeta(phi_, mdot_liq_);
+  double f2 = (abs(beta) < 1e-12) ? 1.0 : beta / (exp(beta) - 1.0);
+  return f2;
+}
+
+double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot_liq_, const int k) {
     int thread = omp_get_thread_num();
     ThermoPhase* gas = gas_vec[thread].get();
+    Transport* trans = trans_vec[thread].get();
 
     double omegadot_;
+    double rho_ = gas->density();
+    double V_ = phi_(0);
+    double T_ = phi_(1);
+    double Z_l_ = phi_(2);
+    double m_d_ = phi_(3);
+    double T_d_ = phi_(4);
+    double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
+    double D_d_ = GetDd(m_d_, T_d_);
+    double M_m = gas->meanMolecularWeight();
+    double M_f = gas->molecularWeight(fuel_idx);
+    double theta_2 = M_m/M_f;
+    double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+    double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+    // reference mass fraction (1/3 rule)
+    double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
+    // reference properties
+    double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+
     switch (k){
-        // V
+        // V: rho_inf * a^2 - rho * V^2
         case 0:
-            omegadot_ = rho_inf * pow(a, 2) - gas->density() * pow(phi_(0), 2);
+            omegadot_ = rho_inf * pow(a, 2) - rho_ * pow(V_, 2);
             break;
-        // T: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar
+        // T:
         case 1:
-            if (reacting) {
-                omegadot_ = -species_enthalpies_mol_vec[thread].dot(omega_dot_mol_vec[thread]);
-            }
-            else
-                omegadot_ = 0.0;
-            break;
-        // Z_l
+          // spray: - (rho*Z_l/m_d) * m_d * c_l * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
+          if (evaporating && D_d_ > D_min && T_d_ < T_l) {
+            omegadot_ = -rho_ * Z_l_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_) /
+                        (liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
+          } else
+            omegadot_ = 0.0;
+          // rxn: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar,
+          if (reacting) {
+              omegadot_ += -species_enthalpies_mol_vec[thread].dot(omega_dot_mol_vec[thread]);
+          }
+          else
+              omegadot_ += 0.0;
+          break;
+        // Z_l: 0
         case 2:
             omegadot_ = 0.0;
             break;
-        // m_d
+        // m_d: 0
         case 3:
             omegadot_ = 0.0;
             break;
+        // T_d: + rho * f2 * (Nu/(3Pr)) * (theta_1/tau_d) * (T - T_d) = rho * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
+        case 4:
+          if (evaporating && D_d_ > D_min && T_d_ < T_l){
+            omegadot_ = rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_)/
+                    (liq->cp_liq(T_d_, p_sys) * liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
+          }
+          else
+            omegadot_ = 0.0;
+          break;
         // Species: omegadot_i^molar * molarmass_i
         default:
             if (reacting) {
@@ -1442,14 +1541,15 @@ double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
     double T_ = phi_(1);
     double Z_l_ = phi_(2);
     double m_d_ = phi_(3);
+    double T_d_ = phi_(4);
     switch (k){
         // V
         case 0:
             gammadot_ = 0.0;
             break;
-        // T: - (rho*Z_l/m_d) * (cp * (T_l - T) - L_v)
+        // T: -(rho*Z_l/m_d) * (-1) * (cp * (T - T_d) + L_v)
         case 1:
-            gammadot_ = - (rho_ * Z_l_ / m_d_) * (gas->cp_mass() * (T_l - T_) - L_v);
+            gammadot_ = - (rho_ * Z_l_ / m_d_) * -1.0 * (gas->cp_mass() * (T_ - T_d_) + L_v); // TODO should be vapour c_p
             break;
         // Z_l: + (rho*Z_l/m_d)
         case 2:
@@ -1459,6 +1559,10 @@ double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
         case 3:
             gammadot_ = rho_;
             break;
+        // T_d: + (rho * L_v) / (c_l * m_d)
+        case 4:
+          gammadot_ = (rho_ * L_v) / (liq->cp_liq(T_d_, p_sys) * m_d_);
+          break;
         // Y_k: - (rho*Z_l/m_d) * delta_{k,f}
         default:
             if (k == m + fuel_idx)
@@ -1469,39 +1573,83 @@ double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
     return gammadot_;
 }
 
-double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_){
+double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_) {
+  int thread = omp_get_thread_num();
+  ThermoPhase* gas = gas_vec[thread].get();
+  Transport* trans = trans_vec[thread].get();
+
+  double T_d_ = std::min(NEAR_ONE*T_l, phi_(4));
+  double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
+  double m_d_ = phi_(3);
+  double D_d_ = GetDd(m_d_, T_d_);
+  double M_m = gas->meanMolecularWeight();
+  double M_f = gas->molecularWeight(fuel_idx);
+  double theta_2 = M_m/M_f;
+  double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+  double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+  // reference mass fraction (1/3 rule)
+  double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
+  // reference properties
+  double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
+//  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+  double rho_ = Yref_ * liq->rho_vap(T_d_, p_sys) + (1.0 - Yref_) * gas->density();
+  double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+  double mu_ = Yref_ * liq->mu_satvap(T_d_, p_sys) + (1.0 - Yref_) * trans->viscosity();
+  // Miller et al 1998, model M7
+  double Sc = mu_/(rho_ * liq->D_satvap(T_d_, p_sys));
+  double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8314.0/M_f ,0.5)) / (1.0 * Sc * p_sys);
+  // use previous time step's mdot_liq, as suggested by Miller
+  double beta = GetBeta(phi_, mdot_liq_);
+  double chi_sneq = chi_seq - (L_k/(D_d_/2.0)) * beta;
+  double Y_sneq = std::min(NEAR_ONE, chi_sneq/(chi_sneq + (1.0 - chi_sneq)*theta_2));
+  double B_Mneq = (Y_sneq - Y_g_)/(1.0 - Y_sneq);
+  return log(1.0 + B_Mneq);
+}
+
+double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot_liq_){
     int thread = omp_get_thread_num();
     ThermoPhase* gas = gas_vec[thread].get();
+    Transport* trans = trans_vec[thread].get();
 
     double mdot_;
     if (evaporating){
-        double rho_ = gas->density();
-        double T_ = phi_(1);
-        double Z_l_ = phi_(2);
-        double m_d_ = phi_(3);
-        // TODO single component fuel assumed!!!
-        // TODO simple Heaviside function evaporation law assumed!!!
-        if (T_ > T_l){
-          if (m_d_ > 0.0 && Z_l_ > 0.0){
-            double A_ = 6.0/M_PI * m_d_/rho_l;
-            // energy analogy mass transfer Spalding number
-            double B_ = gas_vec[thread]->cp_mass()*(T_ - T_l)/L_v;
-            mdot_ = -2.0*M_PI*rho_*pow(A_,1.0/3.0)*mix_diff_coeffs_vec[thread](fuel_idx)*log(1.0 + B_);
-          } else {
-            mdot_ = 0.0;
-          }
-        } else {
-            mdot_ = 0.0;
-        }
-
-        // Guard against condensation
-        if (mdot_ > 0.0){
-          mdot_ = 0.0;
-        }
-    } else {
+      double T_ = phi_(1);
+      double Z_l_ = phi_(2);
+      double m_d_ = phi_(3);
+      double T_d_ = std::min(NEAR_ONE*T_l, phi_(4));
+      double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
+      double D_d_ = GetDd(m_d_, T_d_);
+      double M_m = gas->meanMolecularWeight();
+      double M_f = gas->molecularWeight(fuel_idx);
+      double theta_2 = M_m/M_f;
+      double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+      double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+      // reference mass fraction (1/3 rule)
+      double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
+      // reference properties
+      double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
+//      double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+      double rho_ = Yref_ * liq->rho_vap(T_d_, p_sys) + (1.0 - Yref_) * gas->density();
+      double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+      double mu_ = Yref_ * liq->mu_satvap(T_d_, p_sys) + (1.0 - Yref_) * trans->viscosity();
+      // TODO single component fuel assumed!!!
+      if (m_d_ > 0.0 && Z_l_ > 0.0 && D_d_ > D_min){
+        // Miller et al 1998, Model M7
+        double Sh = GetSh(phi_);
+        double Sc = mu_/(rho_ * liq->D_satvap(T_d_, p_sys));
+        double tau_d = liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)/(18.0 * mu_);
+        mdot_ = - Sh/(3.0 * Sc) * (m_d_/tau_d) * GetHM(phi_, mdot_liq_);
+      } else {
         mdot_ = 0.0;
-    }
-    return mdot_;
+      }
+      // Guard against condensation
+      if (mdot_ > 0.0){
+        mdot_ = 0.0;
+      }
+  } else {
+      mdot_ = 0.0;
+  }
+  return mdot_;
 }
 
 MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
@@ -1526,14 +1674,15 @@ MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){
     SetState(Phi.row(i+1));
     SetDerivedVars();
     rho_inv(i) = 1.0/gas->density();
-    mdot_liq(i) = Getmdot_liq(Phi.row(i+1));
+    double mdot_liq_ = Getmdot_liq(Phi.row(i+1), mdot_liq(i));
     for (int k = 0; k < M; k++){
       c(i, k) = Getc(k);
       mu(i, k) = Getmu(k);
       mu_av(i, k) = Getmu_av(k);
-      omegadot(i, k) = Getomegadot(Phi.row(i+1), k);
+      omegadot(i, k) = Getomegadot(Phi.row(i+1), mdot_liq(i), k);
       Gammadot(i,k) = GetGammadot(Phi.row(i+1), k);
     }
+    mdot_liq(i) = mdot_liq_;
   }
 
   // TODO make AV smarter to only activate on strong gradients
@@ -1579,6 +1728,21 @@ VectorXd Solver::GetSolidRHS(double time_, const Ref<const VectorXd>& T_s_) {
   return RHS_;
 }
 
+void Solver::Clipping(){
+  // Enforce T_d < NEAR_ONE * T_l
+  if (phi.col(4).maxCoeff() > NEAR_ONE * T_l) {
+    std::cout << "  Clipping T_d at t = " << time << "s" << std::endl;
+
+    phi.col(4) = phi.col(4).cwiseMin(NEAR_ONE * T_l);
+
+    // Re-initialize CVode, since solution has changed
+    if (time_scheme == "CVODE") {
+      Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M) = phi;
+      CheckCVODE("CVodeReInit", CVodeReInit(cvode_mem, time, cvode_y));
+    }
+  }
+}
+
 int Solver::RunSolver() {
     std::cout << "Solver::RunSolver()" << std::endl;
 
@@ -1606,6 +1770,9 @@ int Solver::RunSolver() {
             }
             std::chrono::duration<double> diff = std::chrono::system_clock::now() - tic;
             wall_time_per_output += diff.count();
+
+            // Limiters
+            Clipping();
 
             // Update counters
             iteration++;

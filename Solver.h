@@ -14,6 +14,7 @@
 #include "cantera/kinetics/GasQSSKinetics.h"
 #include "cantera/transport.h"
 #include "Eigen/Dense"
+#include "Liquid.h"
 
 using namespace Eigen;
 using namespace Cantera;
@@ -29,6 +30,7 @@ public:
     void ReadParams(int argc, char* argv[]);
     void SetupSolver();
     void SetupGas();
+    void SetupLiquid();
     void SetBCs();
     void DerivedParams();
     void ConstructMesh();
@@ -44,6 +46,7 @@ private:
     bool CheckIgnited();
     void Output();
     void OutputIgnition();
+    void Clipping();
     void StepIntegrator();
     void StepSolid();
     double Getu(const Ref<const MatrixXd>& Phi_, int i);
@@ -55,11 +58,15 @@ private:
     double Getc(const int k);
     double Getmu(const int k);
     double Getmu_av(const int k);
-    double Getomegadot(const Ref<const RowVectorXd>& phi_, const int k);
+    double Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot_liq_, const int k);
     double GetGammadot(const Ref<const RowVectorXd>& phi_, const int k);
-    double Getmdot_liq(const Ref<const RowVectorXd>& phi_);
-    std::string GetCoolPropString(std::string cantera_string);
-    std::string GetCoolPropName(std::string cantera_name);
+    double Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
+    double GetDd(const double m_d_, const double T_d_);
+    double GetNu(const Ref<const RowVectorXd>& phi_);
+    double GetSh(const Ref<const RowVectorXd>& phi_);
+    double Getf2(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
+    double GetBeta(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
+    double GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     int GetSpeciesIndex(std::string cantera_string);
     void SetDerivedVars();
     void CheckCVODE(std::string func_name, int flag);
@@ -68,7 +75,7 @@ private:
     /*
      * Solution tensor \\phi, NxM
      * \\(.) is a tensor, \(.) is a vector
-     * \\phi = [\V, \T, \Z_l, \m_d, \Y1, ..., \YN]
+     * \\phi = [\V, \T, \Z_l, \m_d, \T_d, \Y1, ..., \YN]
      */
     MatrixXd phi;
 
@@ -102,9 +109,9 @@ private:
       int n_species; // number of species in mechanism [-]
       int m;      // number of non-species variables per node (M - n_species)  [-]; 4 when no spray-gas slip and spray is saturated
       bool spray_gas_slip;
-      bool saturated_spray;
       double p_sys;
       double a; // derived
+      std::string liq_type; // liquid properties class to be used
 
       // Solid
       bool conjugate;
@@ -117,6 +124,8 @@ private:
     int n_omp_threads = 1;
     double av_Zl = 0.0;
     double av_md = 0.0;
+    double av_Td = 0.0;
+    double D_min;
     MatrixXd Phi;
     VectorXd u;
     VectorXd rho_inv;
@@ -199,12 +208,13 @@ private:
     std::string X_f;
 
     // Spray
+    std::unique_ptr<Liquid> liq;
     std::string X_liq;
     double T_l;
     double L_v;
-    double rho_l;
     int fuel_idx;
     bool evaporating;
+    const double A_ref = 1.0/3.0; // 1/3 rule
 
     // ICs
     std::string IC_type;
@@ -213,6 +223,7 @@ private:
     VectorXd Y_0; // derived
     double Z_l_0;
     double m_d_0;
+    double T_d_0;
     std::string restart_file;
 
     // BCs
@@ -223,6 +234,7 @@ private:
         double mdot;
         double Z_l_in;
         double m_d_in;
+        double T_d_in;
         double rho_inf; // derived
         VectorXd Y_in; // derived
         RowVectorXd inlet_BC;

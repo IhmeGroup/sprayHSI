@@ -19,6 +19,9 @@ int main(int argc, char* argv[]) {
     // Setup gas object
     spray_solver.SetupGas();
 
+    // Setup liquid object
+    spray_solver.SetupLiquid();
+
     // Compute derived parameters
     spray_solver.DerivedParams();
 
