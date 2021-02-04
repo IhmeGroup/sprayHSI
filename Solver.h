@@ -14,7 +14,7 @@
 #include "cantera/kinetics/GasQSSKinetics.h"
 #include "cantera/transport.h"
 #include "Eigen/Dense"
-#include "Liquid.h"
+#include "Liquid/Liquid.h"
 
 using namespace Eigen;
 using namespace Cantera;
