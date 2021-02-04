@@ -964,6 +964,33 @@ void Solver::SetIC() {
         phi = A * old_Phi;
       }
 
+      // Get time from auxiliary data in file
+      {
+        double time_ = -1.0;
+        while (std::getline(data_stream_, line)){
+          // Start with something like "DATASETAUXDATA time = "0""
+          std::vector<std::string> tmp;
+          boost::split(tmp, line, [](char c) { return c == ' '; });
+          // Now have ["DATASETAUXDATA", "time", "=", ""0""]
+          if (tmp[1] == "time"){
+            std::string tmp2 = tmp[3];
+            // Now have [""0""]
+            tmp2.erase(
+                    remove( tmp2.begin(), tmp2.end(), '\"' ),
+                    tmp2.end()
+            );
+            time_ = std::stod(tmp2);
+            break;
+          }
+        }
+        if (time_ < 0.0)
+          std::cerr << "Could not determine time from restart file: " << restart_file << std::endl;
+        else {
+          time = time_;
+          std::cout << ">  time: " << time << " [s]" << std::endl;
+        }
+      }
+
       // Close file
       data_stream_.close();
 
@@ -976,9 +1003,7 @@ void Solver::SetIC() {
       if (it != tmp.end()) {
         std::advance(it,1);
         iteration = std::stoi(*(it));
-        time = iteration * dt;
         std::cout << ">  iteration: " << iteration << std::endl;
-        std::cout << ">  time: " << time << " [s]" << std::endl;
       } else{
         std::cerr << "Could not determine iteration from restart file: " << restart_file << std::endl;
         throw(0);
