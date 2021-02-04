@@ -1105,6 +1105,7 @@ void Solver::Output() {
         output_file.close();
     } else {
         std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
+        throw(0);
     }
     // Solid
     if (conjugate) {
@@ -1131,6 +1132,7 @@ void Solver::Output() {
         output_file.close();
       } else {
         std::cout << "Unable to open file " << output_path + output_name_ << std::endl;
+        throw(0);
       }
     }
 }
