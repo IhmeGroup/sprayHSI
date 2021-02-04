@@ -15,11 +15,13 @@ public:
   double p_sat(double T) const;
   double L_v(double T) const;
   double rho_liq(double T, double p) const;
+  double rho_vap(double T, double p) const;
   double rho_satvap(double T) const;
   double cp_liq(double T, double p) const;
   double cp_satvap(double T) const;
   double lambda_satvap(double T) const;
-  double mu_satvap(double T) const;
+  double mu_satvap(double T, double p) const;
+  double D_satvap(double T, double p) const;
 
 private:
   std::string GetCoolPropName(const std::string cantera_name);

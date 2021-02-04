@@ -1402,7 +1402,7 @@ double Solver::Getmu_av(const int k) {
 
 double Solver::GetDd(const double m_d_, const double T_d_) {
   if (m_d_ > 0.0)
-    return pow(m_d_/liq->rho_liq(T_d_, p_sys), 1.0/3.0);
+    return pow(m_d_/(M_PI / 6.0 * liq->rho_liq(T_d_, p_sys)), 1.0/3.0);
   else
     return 0.0;
 }
@@ -1431,14 +1431,15 @@ double Solver::GetBeta(const Ref<const RowVectorXd>& phi_, const double mdot_liq
   double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
   double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
   // reference mass fraction (1/3 rule)
-  double Yref_ = (2.0/3.0) * Y_seq + (1.0/3.0) * Y_g_;
+  double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
   // reference properties
   double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
-  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+//  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+  double rho_ = Yref_ * liq->rho_vap(T_d_, p_sys) + (1.0 - Yref_) * gas->density();
   double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
-  double mu_ = Yref_ * liq->mu_satvap(T_d_) + (1.0 - Yref_) * trans->viscosity();
+  double mu_ = Yref_ * liq->mu_satvap(T_d_, p_sys) + (1.0 - Yref_) * trans->viscosity();
 
-  double beta = -((rho_ * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // previous time step's mdot_liq
+  double beta = -((liq->rho_liq(T_d_, p_sys) * cp_ * pow(D_d_, 2))/(12.0 * lambda_)) * (mdot_liq_ / m_d_); // previous time step's mdot_liq
   return beta;
 }
 
@@ -1461,18 +1462,32 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
     double Z_l_ = phi_(2);
     double m_d_ = phi_(3);
     double T_d_ = phi_(4);
+    double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
+    double D_d_ = GetDd(m_d_, T_d_);
+    double M_m = gas->meanMolecularWeight();
+    double M_f = gas->molecularWeight(fuel_idx);
+    double theta_2 = M_m/M_f;
+    double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+    double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+    // reference mass fraction (1/3 rule)
+    double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
+    // reference properties
+    double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+
     switch (k){
         // V: rho_inf * a^2 - rho * V^2
         case 0:
             omegadot_ = rho_inf * pow(a, 2) - rho_ * pow(V_, 2);
             break;
-        // T: rxn: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar, spray: - (rho*Z_l/m_d) * m_d * c_l * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
+        // T:
         case 1:
-          if (GetDd(m_d_, T_d_) > D_min && T_d_ < T_l) {
-            omegadot_ = -rho_ * Z_l_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * trans->thermalConductivity()) /
-                        (liq->rho_liq(T_d_, p_sys) * pow(GetDd(m_d_, T_d_), 2)) * (T_ - T_d_);
+          // spray: - (rho*Z_l/m_d) * m_d * c_l * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
+          if (evaporating && D_d_ > D_min && T_d_ < T_l) {
+            omegadot_ = -rho_ * Z_l_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_) /
+                        (liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
           } else
             omegadot_ = 0.0;
+          // rxn: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar,
           if (reacting) {
               omegadot_ += -species_enthalpies_mol_vec[thread].dot(omega_dot_mol_vec[thread]);
           }
@@ -1489,8 +1504,10 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
             break;
         // T_d: + rho * f2 * (Nu/(3Pr)) * (theta_1/tau_d) * (T - T_d) = rho * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
         case 4:
-          if (GetDd(m_d_, T_d_) > D_min && T_d_ < T_l)
-            omegadot_ = rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * trans->thermalConductivity())/(liq->cp_liq(T_d_, p_sys) * liq->rho_liq(T_d_, p_sys) * pow(GetDd(m_d_, T_d_), 2)) * (T_ - T_d_);
+          if (evaporating && D_d_ > D_min && T_d_ < T_l){
+            omegadot_ = rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_)/
+                    (liq->cp_liq(T_d_, p_sys) * liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
+          }
           else
             omegadot_ = 0.0;
           break;
@@ -1571,14 +1588,15 @@ double Solver::GetHM(const Ref<const RowVectorXd>& phi_, const double mdot_liq_)
   double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
   double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
   // reference mass fraction (1/3 rule)
-  double Yref_ = (2.0/3.0) * Y_seq + (1.0/3.0) * Y_g_;
+  double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
   // reference properties
   double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
-  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+//  double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+  double rho_ = Yref_ * liq->rho_vap(T_d_, p_sys) + (1.0 - Yref_) * gas->density();
   double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
-  double mu_ = Yref_ * liq->mu_satvap(T_d_) + (1.0 - Yref_) * trans->viscosity();
+  double mu_ = Yref_ * liq->mu_satvap(T_d_, p_sys) + (1.0 - Yref_) * trans->viscosity();
   // Miller et al 1998, model M7
-  double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx)); //TODO use reference properties?
+  double Sc = mu_/(rho_ * liq->D_satvap(T_d_, p_sys));
   double L_k = (mu_ * pow(2.0 * M_PI * T_d_ * 8314.0/M_f ,0.5)) / (1.0 * Sc * p_sys);
   // use previous time step's mdot_liq, as suggested by Miller
   double beta = GetBeta(phi_, mdot_liq_);
@@ -1595,31 +1613,43 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot
 
     double mdot_;
     if (evaporating){
-        double rho_ = gas->density();
-        double mu_ = trans->viscosity();
-        double T_ = phi_(1);
-        double Z_l_ = phi_(2);
-        double m_d_ = phi_(3);
-        double T_d_ = phi_(4);
-        double D_d_ = GetDd(m_d_, T_d_);
-        // TODO single component fuel assumed!!!
-        if (m_d_ > 0.0 && Z_l_ > 0.0 && D_d_ > D_min){
-          // Miller et al 1998, Model M7
-          double Sh = GetSh(phi_);
-          double Sc = mu_/(rho_ * mix_diff_coeffs_vec[thread](fuel_idx));
-          double tau_d = liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)/(18.0 * mu_);
-          mdot_ = - Sh/(3.0 * Sc) * (m_d_/tau_d) * GetHM(phi_, mdot_liq_);
-        } else {
-          mdot_ = 0.0;
-        }
-        // Guard against condensation
-        if (mdot_ > 0.0){
-          mdot_ = 0.0;
-        }
-    } else {
+      double T_ = phi_(1);
+      double Z_l_ = phi_(2);
+      double m_d_ = phi_(3);
+      double T_d_ = std::min(NEAR_ONE*T_l, phi_(4));
+      double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
+      double D_d_ = GetDd(m_d_, T_d_);
+      double M_m = gas->meanMolecularWeight();
+      double M_f = gas->molecularWeight(fuel_idx);
+      double theta_2 = M_m/M_f;
+      double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
+      double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
+      // reference mass fraction (1/3 rule)
+      double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
+      // reference properties
+      double cp_ = Yref_ * liq->cp_satvap(T_d_) + (1.0 - Yref_) * gas->cp_mass();
+//      double rho_ = Yref_ * liq->rho_satvap(T_d_) + (1.0 - Yref_) * gas->density();
+      double rho_ = Yref_ * liq->rho_vap(T_d_, p_sys) + (1.0 - Yref_) * gas->density();
+      double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+      double mu_ = Yref_ * liq->mu_satvap(T_d_, p_sys) + (1.0 - Yref_) * trans->viscosity();
+      // TODO single component fuel assumed!!!
+      if (m_d_ > 0.0 && Z_l_ > 0.0 && D_d_ > D_min){
+        // Miller et al 1998, Model M7
+        double Sh = GetSh(phi_);
+        double Sc = mu_/(rho_ * liq->D_satvap(T_d_, p_sys));
+        double tau_d = liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)/(18.0 * mu_);
+        mdot_ = - Sh/(3.0 * Sc) * (m_d_/tau_d) * GetHM(phi_, mdot_liq_);
+      } else {
         mdot_ = 0.0;
-    }
-    return mdot_;
+      }
+      // Guard against condensation
+      if (mdot_ > 0.0){
+        mdot_ = 0.0;
+      }
+  } else {
+      mdot_ = 0.0;
+  }
+  return mdot_;
 }
 
 MatrixXd Solver::GetRHS(double time_, const Ref<const MatrixXd>& phi_){

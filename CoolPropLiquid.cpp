@@ -68,6 +68,11 @@ double CoolPropLiquid::rho_liq(double T, double p) const {
     return CoolProp::PropsSI("DMASS", "T", T, "P", p, coolprop_string);
 }
 
+double CoolPropLiquid::rho_vap(double T, double p) const {
+  // assume ideal gas law
+  return p / (8.314/CoolProp::PropsSI("M", "", 0, "", 0, coolprop_string) * T);
+};
+
 double CoolPropLiquid::rho_satvap(double T) const {
   return CoolProp::PropsSI("DMASS", "T", T, "Q", 1.0, coolprop_string);
 }
@@ -88,8 +93,14 @@ double CoolPropLiquid::lambda_satvap(double T) const {
   return CoolProp::PropsSI("CONDUCTIVITY", "T", T, "Q", 1.0, coolprop_string);
 }
 
-double CoolPropLiquid::mu_satvap(double T) const {
+double CoolPropLiquid::mu_satvap(double T, double p) const {
   return CoolProp::PropsSI("VISCOSITY", "T", T, "Q", 1.0, coolprop_string);
+}
+
+double CoolPropLiquid::D_satvap(double T, double p) const {
+  // assume Le = 1
+//  return lambda_satvap(T) / (rho_satvap(T) * cp_satvap(T));
+  return lambda_satvap(T) / (rho_vap(T, p) * cp_satvap(T));
 }
 
 CoolPropLiquid::~CoolPropLiquid(){

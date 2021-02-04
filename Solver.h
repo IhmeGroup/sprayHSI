@@ -214,6 +214,7 @@ private:
     double L_v;
     int fuel_idx;
     bool evaporating;
+    const double A_ref = 1.0/3.0; // 1/3 rule
 
     // ICs
     std::string IC_type;

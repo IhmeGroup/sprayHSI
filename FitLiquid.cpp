@@ -93,7 +93,6 @@ double FitLiquid::L_v(double T) const {
   double t = std::min(1.0, T / Tcrit);
   return (HV0 * exp(HV1 * t) * pow(1.0 - t, HV2));
   // NOTE: dHv = 0 when T/Tcrit = 1
-//  return 254292.4;
 }
 
 double FitLiquid::rho_liq(double T, double p) const {
@@ -101,13 +100,18 @@ double FitLiquid::rho_liq(double T, double p) const {
   double t = std::min(1.0, T / Tcrit);
   return (DL0 * exp(DL1 * t) * pow(1.0 - t, DL2) + rho_c);
   // NOTE: rho = rho_c when T/Tcrit = 1
-//  return 592.5;
 }
+
+double FitLiquid::rho_vap(double T, double p) const {
+  // assume ideal gas law
+  // this is how CharlesX calculates rho_satvap, with p = p_sys
+  return p / (8314.0/MW * T);
+};
 
 double FitLiquid::rho_satvap(double T) const {
   // vapour density from the ideal gas law, assuming a pure vapour on the gas side of the interface at temperature T
-  return p_sat(T)/ (8314.0/MW * T); //TODO this is what CharlesX does, but is it correct?
-//  return 4.2;
+  // take pressure as p_sat
+  return p_sat(T)/ (8314.0/MW * T);
 }
 
 double FitLiquid::cp_liq(double T, double p) const {
@@ -115,7 +119,6 @@ double FitLiquid::cp_liq(double T, double p) const {
   double t = std::min(NEAR_ONE, T / Tcrit);
   return (exp(CL0 + CL1 * pow(t, CL2 * t + CL3) / pow(1.0 - t, CL4)));
   // NOTE: cp = Inf when T/Tcrit = 1
-//  return 2975.5;
 }
 
 double FitLiquid::cp_satvap(double T) const {
@@ -123,7 +126,6 @@ double FitLiquid::cp_satvap(double T) const {
   double t = std::min(NEAR_ONE, T / Tcrit);
   return (exp(CV0 + CV1 * pow(t, CV2 * t + CV3) / pow(1.0 - t, CV4)));
   // NOTE: cpv = Inf when T/Tcrit = 1
-//  return 2499.3;
 }
 
 double FitLiquid::lambda_satvap(double T) const {
@@ -131,17 +133,23 @@ double FitLiquid::lambda_satvap(double T) const {
   double t = std::min(NEAR_ONE, T / Tcrit);
   return (exp(KV0 + KV1 * pow(t, KV2 * t + KV3) / pow(1.0 - t, KV4)));
   // NOTE: kv = Inf when T/Tcrit = 1
-//  return 0.025;
 }
 
-double FitLiquid::mu_satvap(double T) const {
+double FitLiquid::mu_satvap(double T, double p) const {
   // vapor viscosity [kg/m/s]
   double t = std::min(1.0, T / Tcrit);
   double w = 0.5 * (1.0 + tanh(40.0 * (t - 0.9)));
   double mu0 = VV0 * t + VV1;
-  double mu1 = VV2 * exp(VV3 * rho_satvap(T));
+//  double mu1 = VV2 * exp(VV3 * rho_satvap(T));
+  double mu1 = VV2 * exp(VV3 * rho_vap(T, p));
   return ((1.0 - w) * mu0 + w * mu1);
-//  return 7.44e-6;
+}
+
+double FitLiquid::D_satvap(double T, double p) const {
+  // Vapour diffusivity [m^2/s]
+  // assume Le = 1
+//  return lambda_satvap(T) / (rho_satvap(T) * cp_satvap(T));
+  return lambda_satvap(T) / (rho_vap(T, p) * cp_satvap(T));
 }
 
 FitLiquid::~FitLiquid(){

@@ -21,11 +21,13 @@ public:
   virtual double p_sat(double T) const = 0;
   virtual double L_v(double T) const = 0;
   virtual double rho_liq(double T, double p) const = 0;
+  virtual double rho_vap(double T, double p) const = 0;
   virtual double rho_satvap(double T) const = 0;
   virtual double cp_liq(double T, double p) const = 0;
   virtual double cp_satvap(double T) const = 0;
   virtual double lambda_satvap(double T) const = 0;
-  virtual double mu_satvap(double T) const = 0;
+  virtual double mu_satvap(double T, double p) const = 0;
+  virtual double D_satvap(double T, double p) const = 0;
 
 protected:
   const std::string X_liq;
