@@ -480,35 +480,40 @@ void Solver::SetBCs() {
   for (int k = 0; k < M; k++){
     switch (k){
       //V
-      case 0:
+      case idx_V:
         inlet_BC(k) = 0.0;
         break;
-        // T
-      case 1:
+
+      // T
+      case idx_T:
         inlet_BC(k) = T_in;
         break;
-        // Z_l
-      case 2:
+
+      // Z_l
+      case idx_Z_l:
         if (evaporating)
           inlet_BC(k) = Z_l_in;
         else
           inlet_BC(k) = 0.0;
         break;
-        // m_d
-      case 3:
+
+      // m_d
+      case idx_m_d:
         if (evaporating)
           inlet_BC(k) = m_d_in;
         else
           inlet_BC(k) = 1.0e-300;
         break;
-        // m_d
-      case 4:
+
+      // T_d
+      case idx_T_d:
         if (evaporating)
           inlet_BC(k) = T_d_in;
         else
           inlet_BC(k) = 300.0;
         break;
-        // Species
+
+      // Species
       default:
         inlet_BC(k) = Y_in(k-m);
     }
@@ -825,11 +830,12 @@ void Solver::SetIC() {
       for (int k = 0; k < M; k++) {
         switch (k) {
           // V
-          case 0:
+          case idx_V:
             phi.col(k) = VectorXd::Zero(N);
             break;
+
           // T
-          case 1:
+          case idx_T:
             if (IC_type == "linear_T") {
               double T_ = T_wall;
               for (int i = 0; i < N; i++) {
@@ -840,19 +846,23 @@ void Solver::SetIC() {
               phi.col(k) = Tgas_0 * VectorXd::Constant(N, 1.0);
             }
             break;
+
           // Z_l
-          case 2:
+          case idx_Z_l:
             phi.col(k) = Z_l_0 * VectorXd::Constant(N, 1.0);
             break;
+
           // m_d
-          case 3:
+          case idx_m_d:
             // Set to very small number to ensure T and Z_l spray source terms don't become undefined
             phi.col(k) = m_d_0 * VectorXd::Constant(N, 1.0);
             break;
+
           // T_d
-          case 4:
+          case idx_T_d:
             phi.col(k) = T_d_0 * VectorXd::Constant(N, 1.0);
             break;
+
           // Y_k
           default:
             phi.col(k) = Y_0(k - m) * VectorXd::Constant(N, 1.0);
@@ -1312,8 +1322,8 @@ int Solver::RunSolver() {
             if (conjugate){
               StepSolid();
             }
-            std::chrono::duration<double> diff = std::chrono::system_clock::now() - tic;
-            wall_time_per_output += diff.count();
+            std::chrono::duration<double> diff_ = std::chrono::system_clock::now() - tic;
+            wall_time_per_output += diff_.count();
 
             // Limiters
             Clipping();
