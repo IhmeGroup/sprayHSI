@@ -806,7 +806,293 @@ void Solver::ConstructOperators() {
 void Solver::SetIC() {
     std::cout << "Solver::SetIC()" << std::endl;
 
-    if (restart_file.empty()) {
+    if (!restart_file.empty()){
+      std::cout << "> Restart fluid phase from file: " << restart_file << std::endl;
+      // Set IC using restart file
+      // ASSUME no change in BCs NOR variables
+      // Allow a change in number of points->interpolate
+      // Allow a change in outer dt-> get time from auxiliary data in file
+
+      double T_w_gas; // gas temperature at wall, only used for ensuring solid/fluid file compatibility in conjugate mode
+
+      {
+        // Open file
+        std::ifstream data_stream_(restart_file);
+        if (!data_stream_.is_open()) {
+          std::cerr << "Unable to open file: " << restart_file << std::endl;
+          throw (0);
+        }
+        std::string line;
+        // discard first line
+        std::getline(data_stream_, line);
+
+        // count number of variables m_ from VARIABLES = ...
+        int m_;
+        {
+          std::getline(data_stream_, line);
+          // Start with something like "A:0.7 B:0.3"
+          std::vector<std::string> vars;
+          boost::split(vars, line, [](char c) { return c == ' '; });
+          // Now have ["A:0.7", "B:0.3"]
+          m_ = vars.size() - 2; // remove "VARIABLES" and "="
+          assert(m_ - 4 ==
+                 M); // Derived vars X u ZBilger Rho not considered, restart file must have same number of vars as current sim
+        }
+
+        // get number of grid points n_ from ZONE I= ...; assert r > 2
+        int n_;
+        {
+          std::getline(data_stream_, line);
+          // Start with something like "ZONE I=14"
+          std::vector<std::string> tmp;
+          boost::split(tmp, line, [](char c) { return c == ' '; });
+          // Now have ["ZONE", "I=14"]
+          std::vector<std::string> tmp2;
+          boost::split(tmp2, tmp[1], [](char c) { return c == '='; });
+          // Now have ["I", "14"]
+          n_ = std::stoi(tmp2[1]);
+        }
+
+        // create Eigen matrix old_mat of size nxm from data
+        MatrixXd old_mat = MatrixXd::Zero(n_, m_);
+        {
+          for (int i = 0; i < n_; i++) {
+            std::getline(data_stream_, line);
+            // Start with something like "0.0 0.5 0.6"
+            std::vector<std::string> tmp;
+            boost::split(tmp, line, [](char c) { return c == ' '; }, boost::token_compress_on);
+            if (tmp[0].empty()) tmp.erase(tmp.begin());
+            // Now have ["0.0", "0.5", "0.6"]
+            for (int j = 0; j < m_; j++) {
+              old_mat(i, j) = std::stod(tmp[j]);
+            }
+          }
+        }
+
+        if (verbose) std::cout << "Data read from file: " << std::endl << old_mat << std::endl;
+
+        // create position vector old_nodes from old_mat.col(0)
+        VectorXd old_nodes = old_mat.col(0);
+
+        // create old_Phi from old_mat.cols(4:end)
+        MatrixXd old_Phi = old_mat.rightCols(m_ - 4);
+        T_w_gas = old_Phi(0,idx_T);
+
+        // interpolate phi from old_Phi using nodes and old_nodes
+        {
+          VectorXd c0 = VectorXd::Zero(N);
+          VectorXi i_c0 = VectorXi::Zero(N);
+          // loop on new interior nodes
+          for (int i = 0; i < N; i++) {
+            // find old_node to the left of current node. Always available since phi is interior, and old_Phi is full domain.
+            double eps = 1.0e-10; // in case restarting from identical mesh
+            int j = 0;
+            while (old_nodes(j) < nodes(i + 1) + eps) {
+              j++;
+            }
+            j -= 1;
+            i_c0(i) = j;
+            c0(i) = -(nodes(i + 1) - old_nodes(j)) / (old_nodes(j + 1) - old_nodes(j)) + 1.0;
+          }
+          VectorXd c1 = VectorXd::Ones(N) - c0;
+          // Create interpolation matrix
+          MatrixXd A = MatrixXd::Zero(N, n_);
+          for (int i = 0; i < N; i++) {
+            for (int j = 0; j < n_; j++) {
+              if (j == i_c0(i)) {
+                A(i, j) = c0(i);
+                A(i, j + 1) = c1(i);
+              }
+            }
+          }
+          phi = A * old_Phi;
+        }
+
+        // Get time from auxiliary data in file
+        {
+          double time_ = -1.0;
+          while (std::getline(data_stream_, line)) {
+            // Start with something like "DATASETAUXDATA time = "0""
+            std::vector<std::string> tmp;
+            boost::split(tmp, line, [](char c) { return c == ' '; });
+            // Now have ["DATASETAUXDATA", "time", "=", ""0""]
+            if (tmp[1] == "time") {
+              std::string tmp2 = tmp[3];
+              // Now have [""0""]
+              tmp2.erase(
+                      remove(tmp2.begin(), tmp2.end(), '\"'),
+                      tmp2.end()
+              );
+              time_ = std::stod(tmp2);
+              break;
+            }
+          }
+          if (time_ < 0.0)
+            std::cerr << "Could not determine time from restart file: " << restart_file << std::endl;
+          else {
+            time = time_;
+            std::cout << ">  time: " << time << " [s]" << std::endl;
+          }
+        }
+
+        // Close file
+        data_stream_.close();
+
+        // Set iteration based on file name
+        // Start with something like "ignition_iter_100_row_0_notign.dat"
+        std::vector<std::string> tmp;
+        boost::split(tmp, restart_file, [](char c) { return c == '_'; });
+        // Now have ["ignition", "iter", "100", "row", "0", "notign.dat"]
+        auto it = std::find(tmp.begin(), tmp.end(), "iter");
+        if (it != tmp.end()) {
+          std::advance(it, 1);
+          iteration = std::stoi(*(it));
+          std::cout << ">  iteration: " << iteration << std::endl;
+        } else {
+          std::cerr << "Could not determine iteration from restart file: " << restart_file << std::endl;
+          throw (0);
+        }
+      }
+
+      // TODO add restart capability for files with conjugate HT
+      // Set solid IC using solid restart file
+      if (conjugate){
+
+        // Construct solid_restart_file name
+        std::string solid_restart_file_ = restart_file;
+        size_t idx = solid_restart_file_.find("iter");
+        assert(idx != std::string::npos);
+        solid_restart_file_.insert(idx, "solid_");
+        std::cout << "> Restart solid phase from file: " << solid_restart_file_ << std::endl;
+
+        // Open file
+        std::ifstream data_stream_(solid_restart_file_);
+        if (!data_stream_.is_open()) {
+          std::cerr << "Unable to open file: " << solid_restart_file_ << std::endl;
+          throw (0);
+        }
+        std::string line;
+        // discard first line
+        std::getline(data_stream_, line);
+
+        // count number of variables m_ from VARIABLES = ...
+        int m_;
+        {
+          std::getline(data_stream_, line);
+          // Start with something like "A:0.7 B:0.3"
+          std::vector<std::string> vars;
+          boost::split(vars, line, [](char c) { return c == ' '; });
+          // Now have ["A:0.7", "B:0.3"]
+          m_ = vars.size() - 2; // remove "VARIABLES" and "="
+          assert(m_ - 1 ==
+                 1); // Derived var X not considered, solid restart file must have same number of vars as current sim, namely only T_S
+        }
+
+        // get number of grid points n_ from ZONE I= ...; assert r > 2
+        int n_;
+        {
+          std::getline(data_stream_, line);
+          // Start with something like "ZONE I=14"
+          std::vector<std::string> tmp;
+          boost::split(tmp, line, [](char c) { return c == ' '; });
+          // Now have ["ZONE", "I=14"]
+          std::vector<std::string> tmp2;
+          boost::split(tmp2, tmp[1], [](char c) { return c == '='; });
+          // Now have ["I", "14"]
+          n_ = std::stoi(tmp2[1]);
+        }
+
+        // create Eigen matrix old_mat of size nxm from data
+        MatrixXd old_mat = MatrixXd::Zero(n_, m_);
+        {
+          for (int i = 0; i < n_; i++) {
+            std::getline(data_stream_, line);
+            // Start with something like "0.0 0.5 0.6"
+            std::vector<std::string> tmp;
+            boost::split(tmp, line, [](char c) { return c == ' '; }, boost::token_compress_on);
+            if (tmp[0].empty()) tmp.erase(tmp.begin());
+            // Now have ["0.0", "0.5", "0.6"]
+            for (int j = 0; j < m_; j++) {
+              old_mat(i, j) = std::stod(tmp[j]);
+            }
+          }
+        }
+
+        if (verbose) std::cout << "Data read from file: " << std::endl << old_mat << std::endl;
+
+        // create position vector old_nodes from old_mat.col(0)
+        VectorXd old_nodes = old_mat.col(0);
+
+        // create old_T_s from old_mat.cols(4:end)
+        MatrixXd old_T_s = old_mat.rightCols(m_ - 1);
+
+        // interpolate phi from old_T_s using nodes and old_nodes
+        {
+          VectorXd c0 = VectorXd::Zero(N_s);
+          VectorXi i_c0 = VectorXi::Zero(N_s);
+          // loop on new interior nodes
+          for (int i = 0; i < N_s; i++) {
+            // find old_node to the left of current node. Always available since phi is interior, and old_T_s is full domain.
+            double eps = 1.0e-10; // in case restarting from identical mesh
+            int j = 0;
+            while (old_nodes(j) < nodes_s(i + 1) + eps) {
+              j++;
+            }
+            j -= 1;
+            i_c0(i) = j;
+            c0(i) = -(nodes_s(i + 1) - old_nodes(j)) / (old_nodes(j + 1) - old_nodes(j)) + 1.0;
+          }
+          VectorXd c1 = VectorXd::Ones(N_s) - c0;
+          // Create interpolation matrix
+          MatrixXd A = MatrixXd::Zero(N_s, n_);
+          for (int i = 0; i < N_s; i++) {
+            for (int j = 0; j < n_; j++) {
+              if (j == i_c0(i)) {
+                A(i, j) = c0(i);
+                A(i, j + 1) = c1(i);
+              }
+            }
+          }
+          T_s = A * old_T_s;
+        }
+
+        // Get time from auxiliary data in file
+        {
+          double time_ = -1.0;
+          while (std::getline(data_stream_, line)) {
+            // Start with something like "DATASETAUXDATA time = "0""
+            std::vector<std::string> tmp;
+            boost::split(tmp, line, [](char c) { return c == ' '; });
+            // Now have ["DATASETAUXDATA", "time", "=", ""0""]
+            if (tmp[1] == "time") {
+              std::string tmp2 = tmp[3];
+              // Now have [""0""]
+              tmp2.erase(
+                      remove(tmp2.begin(), tmp2.end(), '\"'),
+                      tmp2.end()
+              );
+              time_ = std::stod(tmp2);
+              break;
+            }
+          }
+          if (time_ < 0.0){
+            std::cerr << "Could not determine time from solid restart file: " << solid_restart_file_ << std::endl;
+          } else if (time != time_){
+            std::cerr << "Time from solid restart file does not agree with that of the fluid restart file." << std::endl;
+            throw(0);
+          }
+        }
+
+        // Close file
+        data_stream_.close();
+
+        // Set inner wall temperatures using solid restart file (only necessary for conjugate HT)
+        T_wall = old_T_s(0);
+        //Ensure this is the same as fluid restart file wall temperature (i.e. compatible restart files)
+        assert(T_wall == T_w_gas);
+
+      }
+    } else {
       std::cout << "> Restart from initial conditions" << std::endl;
 
       if (conjugate){
@@ -816,14 +1102,14 @@ void Solver::SetIC() {
           ThermoPhase* gas_ = gas_vec[thread].get();
           Transport* trans_ = trans_vec[thread].get();
           T_wall = GetTWall<double>(gas_,trans_,T_in,T_s_ext,p_sys,X_0,L,L_s,lam_s);
-        // Steady-state T_wall = Tgas_0 = T_s_ext if conjugate HT and constant_T IC
+          // Steady-state T_wall = Tgas_0 = T_s_ext if conjugate HT and constant_T IC
         } else if (IC_type == "constant_T") {
           T_wall = Tgas_0;
           assert(T_wall == T_s_ext);
         }
         std::cout << "> T_wall_0 = " << std::fixed << std::setprecision(1) << T_wall << std::endl;
       }
-       // in non-conjugate cases, T_wall is provided explicitly or is unnecessary (i.e. adiabatic wall)
+      // in non-conjugate cases, T_wall is provided explicitly or is unnecessary (i.e. adiabatic wall)
 
       // Gas/spray
       // loop over all variables
@@ -834,7 +1120,7 @@ void Solver::SetIC() {
             phi.col(k) = VectorXd::Zero(N);
             break;
 
-          // T
+            // T
           case idx_T:
             if (IC_type == "linear_T") {
               double T_ = T_wall;
@@ -847,23 +1133,23 @@ void Solver::SetIC() {
             }
             break;
 
-          // Z_l
+            // Z_l
           case idx_Z_l:
             phi.col(k) = Z_l_0 * VectorXd::Constant(N, 1.0);
             break;
 
-          // m_d
+            // m_d
           case idx_m_d:
             // Set to very small number to ensure T and Z_l spray source terms don't become undefined
             phi.col(k) = m_d_0 * VectorXd::Constant(N, 1.0);
             break;
 
-          // T_d
+            // T_d
           case idx_T_d:
             phi.col(k) = T_d_0 * VectorXd::Constant(N, 1.0);
             break;
 
-          // Y_k
+            // Y_k
           default:
             phi.col(k) = Y_0(k - m) * VectorXd::Constant(N, 1.0);
         }
@@ -882,148 +1168,6 @@ void Solver::SetIC() {
       // Set time and iteration to initial condition
       iteration = 0;
       time = 0.0;
-    } else {
-      // TODO add restart capability for files with conjugate HT and wall heat flux output
-      std::cout << "> Restart from file: " << restart_file << std::endl;
-      // Set IC using restart file
-      // ASSUME no change in BCs NOR variables NOR (outer) dt
-      // Allow a change in number of points; interpolate
-
-      // Open file
-      std::ifstream data_stream_(restart_file);
-      if (!data_stream_.is_open()){
-        std::cerr << "Unable to open file: " << restart_file << std::endl;
-        throw(0);
-      }
-      std::string line;
-      // discard first line
-      std::getline(data_stream_, line);
-
-      // count number of variables m_ from VARIABLES = ...
-      int m_;
-      {
-        std::getline(data_stream_, line);
-        // Start with something like "A:0.7 B:0.3"
-        std::vector<std::string> vars;
-        boost::split(vars, line, [](char c) { return c == ' '; });
-        // Now have ["A:0.7", "B:0.3"]
-        m_ = vars.size() - 2; // remove "VARIABLES" and "="
-        assert(m_ - 4 ==
-               M); // Derived vars X u ZBilger Rho not considered, restart file must have same number of vars as current sim
-      }
-
-      // get number of grid points n_ from ZONE I= ...; assert r > 2
-      int n_;
-      {
-        std::getline(data_stream_, line);
-        // Start with something like "ZONE I=14"
-        std::vector<std::string> tmp;
-        boost::split(tmp, line, [](char c) { return c == ' '; });
-        // Now have ["ZONE", "I=14"]
-        std::vector<std::string> tmp2;
-        boost::split(tmp2, tmp[1], [](char c) { return c == '='; });
-        // Now have ["I", "14"]
-        n_ = std::stoi(tmp2[1]);
-      }
-
-      // create Eigen matrix old_mat of size nxm from data
-      MatrixXd old_mat = MatrixXd::Zero(n_, m_);
-      {
-        for (int i = 0; i < n_; i++) {
-          std::getline(data_stream_, line);
-          // Start with something like "0.0 0.5 0.6"
-          std::vector<std::string> tmp;
-          boost::split(tmp, line, [](char c) { return c == ' '; }, boost::token_compress_on);
-          if (tmp[0].empty()) tmp.erase(tmp.begin());
-          // Now have ["0.0", "0.5", "0.6"]
-          for (int j = 0; j < m_; j++) {
-            old_mat(i, j) = std::stod(tmp[j]);
-          }
-        }
-      }
-
-      if (verbose) std::cout << "Data read from file: " << std::endl << old_mat << std::endl;
-
-      // create position vector old_nodes from old_mat.col(0)
-      VectorXd old_nodes = old_mat.col(0);
-
-      // create old_Phi from old_mat.cols(4:end)
-      MatrixXd old_Phi = old_mat.rightCols(m_-4);
-
-      // interpolate phi from old_Phi using nodes and old_nodes
-      {
-        VectorXd c0 = VectorXd::Zero(N);
-        VectorXi i_c0 = VectorXi::Zero(N);
-        // loop on new interior nodes
-        for (int i = 0; i < N; i++) {
-          // find old_node to the left of current node. Always available since phi is interior, and old_Phi is full domain.
-          double eps = 1.0e-10; // in case restarting from identical mesh
-          int j = 0;
-          while (old_nodes(j) < nodes(i + 1) + eps) {
-            j++;
-          }
-          j -= 1;
-          i_c0(i) = j;
-          c0(i) = -(nodes(i + 1) - old_nodes(j)) / (old_nodes(j + 1) - old_nodes(j)) + 1.0;
-        }
-        VectorXd c1 = VectorXd::Ones(N) - c0;
-        // Create interpolation matrix
-        MatrixXd A = MatrixXd::Zero(N, n_);
-        for (int i = 0; i < N; i++) {
-          for (int j = 0; j < n_; j++) {
-            if (j == i_c0(i)) {
-              A(i, j) = c0(i);
-              A(i, j + 1) = c1(i);
-            }
-          }
-        }
-        phi = A * old_Phi;
-      }
-
-      // Get time from auxiliary data in file
-      {
-        double time_ = -1.0;
-        while (std::getline(data_stream_, line)){
-          // Start with something like "DATASETAUXDATA time = "0""
-          std::vector<std::string> tmp;
-          boost::split(tmp, line, [](char c) { return c == ' '; });
-          // Now have ["DATASETAUXDATA", "time", "=", ""0""]
-          if (tmp[1] == "time"){
-            std::string tmp2 = tmp[3];
-            // Now have [""0""]
-            tmp2.erase(
-                    remove( tmp2.begin(), tmp2.end(), '\"' ),
-                    tmp2.end()
-            );
-            time_ = std::stod(tmp2);
-            break;
-          }
-        }
-        if (time_ < 0.0)
-          std::cerr << "Could not determine time from restart file: " << restart_file << std::endl;
-        else {
-          time = time_;
-          std::cout << ">  time: " << time << " [s]" << std::endl;
-        }
-      }
-
-      // Close file
-      data_stream_.close();
-
-      // Set iteration based on file name
-      // Start with something like "ignition_iter_100_row_0_notign.dat"
-      std::vector<std::string> tmp;
-      boost::split(tmp, restart_file, [](char c) { return c == '_'; });
-      // Now have ["ignition", "iter", "100", "row", "0", "notign.dat"]
-      auto it = std::find(tmp.begin(), tmp.end(), "iter");
-      if (it != tmp.end()) {
-        std::advance(it,1);
-        iteration = std::stoi(*(it));
-        std::cout << ">  iteration: " << iteration << std::endl;
-      } else{
-        std::cerr << "Could not determine iteration from restart file: " << restart_file << std::endl;
-        throw(0);
-      }
     }
 
     if (verbose){
@@ -1036,6 +1180,9 @@ void Solver::SetIC() {
 
     // Set BCs to match ICs
     SetBCs();
+
+    // Set q_wall to match ICs
+    SetGasQWall();
 }
 
 bool Solver::CheckIgnited() {

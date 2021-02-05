@@ -93,9 +93,6 @@ void Solver::SetGasQWall() {
   Transport* trans_ = trans_vec[thread].get();
   SetState(phi.row(0));
   double lam_g_ = trans_->thermalConductivity();
-
-  // Create Phi = [wall_interior_BC, phi, inlet_BC]^T
-  Phi << wall_interior_BC, phi, inlet_BC;
   double dTgdx_w = (phi(0, idx_T) - wall_interior_BC(idx_T))/dx(0);
   q_wall = lam_g_ * dTgdx_w;
 
