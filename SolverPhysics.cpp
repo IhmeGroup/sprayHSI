@@ -96,7 +96,8 @@ void Solver::SetGasQWall() {
 
   // Create Phi = [wall_interior_BC, phi, inlet_BC]^T
   Phi << wall_interior_BC, phi, inlet_BC;
-  q_wall = lam_g_ * (ddx * Phi.col(idx_T))(0);
+  double dTgdx_w = (phi(0, idx_T) - wall_interior_BC(idx_T))/dx(0);
+  q_wall = lam_g_ * dTgdx_w;
 
   if (verbose)
     std::cout << "q_wall = " << q_wall << "W/m2" << std::endl;
