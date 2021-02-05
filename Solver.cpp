@@ -434,35 +434,41 @@ void Solver::SetBCs() {
   for (int k = 0; k < M; k++){
     switch (k){
       //V
-      case 0:
+      case idx_V:
         wall_interior_BC(k) = 0.0;
         break;
+
       // T
-      case 1:
-        if ((wall_type == "isothermal") || conjugate)
+      case idx_T:
+        if ((wall_type == "isothermal") || conjugate){
           wall_interior_BC(k) = T_wall;
-        else if (wall_type == "adiabatic")
+        } else if (wall_type == "adiabatic") {
           // 1st order one-sided difference
           wall_interior_BC(k) = phi(0, k);
-        else
+        } else {
           throw(0);
+        }
         break;
+
       // TODO update Z_l and m_d BCs for filming/rebound
       // Z_l
-      case 2:
+      case idx_Z_l:
         // 1st order one-sided difference in case of AV
         wall_interior_BC(k) = phi(0, k);
         break;
+
       // m_d
-      case 3:
+      case idx_m_d:
         // 1st order one-sided difference in case of AV
         wall_interior_BC(k) = phi(0, k);
         break;
+
       // T_d
-      case 4:
+      case idx_T_d:
         // 1st order one-sided difference in case of AV
         wall_interior_BC(k) = phi(0, k);
         break;
+
       // Species
       default:
         // TODO Species have no flux at wall for now... change when multiphase and filming
@@ -994,7 +1000,7 @@ void Solver::SetIC() {
       // Close file
       data_stream_.close();
 
-      // Set time and iteration based on file name
+      // Set iteration based on file name
       // Start with something like "ignition_iter_100_row_0_notign.dat"
       std::vector<std::string> tmp;
       boost::split(tmp, restart_file, [](char c) { return c == '_'; });
@@ -1025,7 +1031,7 @@ void Solver::SetIC() {
 bool Solver::CheckIgnited() {
   bool ignited_ = false;
   if (ign_cond == "T_max") {
-    ignited = (phi.col(1).maxCoeff() > T_max);
+    ignited = (phi.col(idx_T).maxCoeff() > T_max);
   }
 
   if (ignited){
@@ -1065,7 +1071,7 @@ void Solver::Output() {
     for (int i = 0; i < N+2; i++){
       u_(i) = Getu(Phi,i);
       ZBilger_(i) = GetZBilger(Phi,i);
-      D_d_(i) = GetDd(Phi(i,3), Phi(i,4));
+      D_d_(i) = GetDd(Phi(i,idx_m_d), Phi(i,idx_T_d));
     }
 
     // Console output of data
@@ -1083,12 +1089,12 @@ void Solver::Output() {
       std::cout << std::left << std::setw(width_) << nodes(i); // x
       std::cout << std::left << std::setw(width_) << u_(i); // u
       std::cout << std::left << std::setw(width_) << rho_(i); // rho
-      std::cout << std::left << std::setw(width_) << Phi(i,0); // V
-      std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,1); // T
+      std::cout << std::left << std::setw(width_) << Phi(i,idx_V); // V
+      std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,idx_T); // T
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << ZBilger_(i); // ZBilger
-      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,2); // Z_l
+      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,idx_Z_l); // Z_l
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << D_d_(i); // D_d
-      std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,4); // T_d
+      std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,idx_T_d); // T_d
       for (const auto& s : output_species){
         std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,m + GetSpeciesIndex(s)); // Y
       }
@@ -1167,7 +1173,7 @@ void Solver::OutputIgnition() {
   std::cout << "---------------------------------------------------------" << std::endl;
   std::cout << "  Solver::OutputIgnition()" << std::endl;
   int max_row_;
-  double max_T_ = phi.col(1).maxCoeff(&max_row_);
+  double max_T_ = phi.col(idx_T).maxCoeff(&max_row_);
   double x_ign_ = nodes(max_row_+1);
   double dx_ign_avg_ = (dx(max_row_) + dx(max_row_+1))/2.0;
   if (ign_cond == "T_max") {
@@ -1182,30 +1188,30 @@ void Solver::OutputIgnition() {
     ign_file_ << ign_header << std::endl;
   }
 
-  // Create Phi = [wall_interior_BC, phi, inlet_BC]^T
-  MatrixXd Phi(wall_interior_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
-  Phi << wall_interior_BC, phi, inlet_BC;
+  // Create Phi_ = [wall_interior_BC, phi, inlet_BC]^T
+  MatrixXd Phi_(wall_interior_BC.rows() + phi.rows() + inlet_BC.rows(), phi.cols());
+  Phi_ << wall_interior_BC, phi, inlet_BC;
 
   std::ofstream ign_file_(ign_file_path_, std::ios_base::app);
   if (ign_file_.is_open()){
     std::cout << "Writing to ignition_data.csv" << std::endl;
     //row_index,iteration,time, and x,dx_avg,u,ZBilger,rho,V,T,Zl,md,Y_k @ ignition location, ignition time
     ign_file_ <<
-    row_index << "," <<
-    iteration << "," <<
-    time << "," <<
-    x_ign_ << "," <<
-    dx_ign_avg_ << "," <<
-    Getu(Phi,max_row_+1) << "," <<
-    GetZBilger(Phi,max_row_+1) << "," <<
-    Getrho(phi.row(max_row_)) << "," <<
-    phi(max_row_,0) << "," <<
-    phi(max_row_,1) << "," <<
-    phi(max_row_,2) << "," <<
-    phi(max_row_,3) << "," <<
-    phi(max_row_,4);
+              row_index << "," <<
+              iteration << "," <<
+              time << "," <<
+              x_ign_ << "," <<
+              dx_ign_avg_ << "," <<
+              Getu(Phi_, max_row_ + 1) << "," <<
+              GetZBilger(Phi_, max_row_ + 1) << "," <<
+              Getrho(phi.row(max_row_)) << "," <<
+    phi(max_row_,idx_V) << "," <<
+    phi(max_row_,idx_T) << "," <<
+    phi(max_row_,idx_Z_l) << "," <<
+    phi(max_row_,idx_m_d) << "," <<
+    phi(max_row_,idx_T_d);
     for (const auto& s : output_species){
-      ign_file_ << "," << Phi(max_row_,m + GetSpeciesIndex(s));
+      ign_file_ << "," << Phi_(max_row_+1, m + GetSpeciesIndex(s));
     }
     ign_file_ << std::endl;
   }
@@ -1255,7 +1261,6 @@ void Solver::StepSolid() {
 
   // Set T_wall from solid gas-side temperature
   T_wall = T_s(0) + q_wall * dx_s(0) / lam_s; // 1st order one-sided difference
-
 }
 
 void Solver::SetDerivedVars(){
@@ -1269,10 +1274,10 @@ void Solver::SetDerivedVars(){
 
 void Solver::Clipping(){
   // Enforce T_d < NEAR_ONE * T_l
-  if (phi.col(4).maxCoeff() > NEAR_ONE * T_l) {
+  if (phi.col(idx_T_d).maxCoeff() > NEAR_ONE * T_l) {
     std::cout << "  Clipping T_d at t = " << time << "s" << std::endl;
 
-    phi.col(4) = phi.col(4).cwiseMin(NEAR_ONE * T_l);
+    phi.col(idx_T_d) = phi.col(idx_T_d).cwiseMin(NEAR_ONE * T_l);
 
     // Re-initialize CVode, since solution has changed
     if (time_scheme == "CVODE") {

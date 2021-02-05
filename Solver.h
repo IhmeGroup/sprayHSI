@@ -72,6 +72,8 @@ private:
     void CheckCVODE(std::string func_name, int flag);
     static int cvode_RHS(double t, N_Vector y, N_Vector ydot, void *f_data);
 
+    enum VarIndex {idx_V, idx_T, idx_Z_l, idx_m_d, idx_T_d};
+
     /*
      * Solution tensor \\phi, NxM
      * \\(.) is a tensor, \(.) is a vector
