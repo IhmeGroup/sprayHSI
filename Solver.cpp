@@ -1255,6 +1255,7 @@ void Solver::StepIntegrator() {
       std::cerr << "Temporal scheme " << time_scheme << " not recognized." << std::endl;
       throw(0);
   }
+  SetBCs(); // this is necessary for conjugate HT and for adiabatic walls, i.e. maintaining dynamic BCs' consistency with new solution, since SetBCs() is called by GetRHS() using partial solutions
 }
 
 void Solver::StepSolid() {
@@ -1303,9 +1304,6 @@ int Solver::RunSolver() {
     try {
         while(!CheckStop()){
 
-            // Compute the gas-side wall heat flux
-            SetGasQWall();
-
             // Outputs
             if (!(iteration % output_interval)){
                 Output();
@@ -1316,12 +1314,19 @@ int Solver::RunSolver() {
                 }
             }
 
-            // Integrate ODE
+            // Integrate gas/spray-phase system
             std::chrono::time_point<std::chrono::system_clock> tic = std::chrono::system_clock::now();
             StepIntegrator();
+
+            // Compute the gas-side wall heat flux
+            SetGasQWall();
+
+            // Integrate solid-phase system
             if (conjugate){
               StepSolid();
             }
+
+            // Update timer
             std::chrono::duration<double> diff_ = std::chrono::system_clock::now() - tic;
             wall_time_per_output += diff_.count();
 
