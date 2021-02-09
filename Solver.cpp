@@ -91,6 +91,10 @@ void Solver::ReadParams(int argc, char* argv[]){
           X_liq = toml::find(Spray_, "species").as_string();
           liq_type = toml::find(Spray_, "properties").as_string();
           spray_gas_slip = toml::find(Spray_,"spray_gas_slip").as_boolean();
+        } else {
+          X_liq = "";
+          liq_type = "fit";
+          spray_gas_slip = false;
         }
       }
 
