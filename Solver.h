@@ -236,6 +236,7 @@ private:
         double mdot;
         double Z_l_in;
         double m_d_in;
+        double D_d_in;
         double T_d_in;
         double rho_inf; // derived
         VectorXd Y_in; // derived

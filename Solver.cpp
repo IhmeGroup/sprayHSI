@@ -180,8 +180,10 @@ void Solver::ReadParams(int argc, char* argv[]){
             // Spray
             const auto Spray_ = toml::find(Inlet_, "Spray");
             Z_l_in = toml::find(Spray_, "Z_l").as_floating();
-            m_d_in = toml::find(Spray_, "m_d").as_floating();
+            //m_d_in = toml::find(Spray_, "m_d").as_floating();
             T_d_in = toml::find(Spray_, "T_d").as_floating();
+            m_d_in = toml::find_or<double>(Spray_,"m_d",-1.0);
+            D_d_in = toml::find_or<double>(Spray_,"D_d",-1.0);
         }
 
         // Wall_Interior
@@ -596,14 +598,19 @@ void Solver::DerivedParams() {
         L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
         D_min = 30.0 * dt; // TODO figure out why this factor works
-        double D_in_ = GetDd(m_d_in, T_d_in);
+        if (D_d_in > 0.0 && m_d_in > 0.0){
+          std::cerr << "Inlet BC: Can only provide one of D_d or m_d" << std::endl;
+          throw(0);
+        }
+        if (m_d_in > 0.0) D_d_in = GetDd(m_d_in, T_d_in);
+        else m_d_in = (M_PI/6.0) * liq->rho_liq(T_d_in, p_sys) * pow(D_d_in, 3.0);
         // Don't allow error due to D_min to exceed 10% of initial volume
-        if (pow(D_min/D_in_,3.0) > 0.1){
-          std::cerr << "(D_min/D_inlet)^3 = " << pow(D_min/D_in_,3.0) << " > 0.1. Reduce dt." << std::endl;
+        if (pow(D_min/D_d_in,3.0) > 0.1){
+          std::cerr << "(D_min/D_inlet)^3 = " << pow(D_min/D_d_in,3.0) << " > 0.1. Reduce dt." << std::endl;
           throw(0);
         } else {
           std::cout << "> D_min = " << D_min << std::endl;
-          std::cout << "> (D_min/D_inlet)^3 = " << pow(D_min/D_in_,3.0) << std::endl;
+          std::cout << "> (D_min/D_inlet)^3 = " << pow(D_min/D_d_in,3.0) << std::endl;
         }
     } else {
         T_l = L_v = 0.0;
