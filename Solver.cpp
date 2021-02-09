@@ -184,6 +184,10 @@ void Solver::ReadParams(int argc, char* argv[]){
             T_d_in = toml::find(Spray_, "T_d").as_floating();
             m_d_in = toml::find_or<double>(Spray_,"m_d",-1.0);
             D_d_in = toml::find_or<double>(Spray_,"D_d",-1.0);
+            if (D_d_in > 0.0 && m_d_in > 0.0){
+              std::cerr << "Inlet BC: Can only provide one of D_d or m_d" << std::endl;
+              throw(0);
+            }
         }
 
         // Wall_Interior
@@ -598,10 +602,6 @@ void Solver::DerivedParams() {
         L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
         D_min = 30.0 * dt; // TODO figure out why this factor works
-        if (D_d_in > 0.0 && m_d_in > 0.0){
-          std::cerr << "Inlet BC: Can only provide one of D_d or m_d" << std::endl;
-          throw(0);
-        }
         if (m_d_in > 0.0) D_d_in = GetDd(m_d_in, T_d_in);
         else m_d_in = (M_PI/6.0) * liq->rho_liq(T_d_in, p_sys) * pow(D_d_in, 3.0);
         // Don't allow error due to D_min to exceed 10% of initial volume
