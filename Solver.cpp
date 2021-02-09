@@ -596,7 +596,15 @@ void Solver::DerivedParams() {
         L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
         D_min = 30.0 * dt; // TODO figure out why this factor works
-        std::cout << "> D_min = " << D_min << std::endl;
+        double D_in_ = GetDd(m_d_in, T_d_in);
+        // Don't allow error due to D_min to exceed 10% of initial volume
+        if (pow(D_min/D_in_,3.0) > 0.1){
+          std::cerr << "(D_min/D_inlet)^3 = " << pow(D_min/D_in_,3.0) << " > 0.1. Reduce dt." << std::endl;
+          throw(0);
+        } else {
+          std::cout << "> D_min = " << D_min << std::endl;
+          std::cout << "> (D_min/D_inlet)^3 = " << pow(D_min/D_in_,3.0) << std::endl;
+        }
     } else {
         T_l = L_v = 0.0;
         fuel_idx = -1;
