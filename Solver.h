@@ -215,7 +215,7 @@ private:
     double T_l;
     double L_v;
     int fuel_idx;
-    bool evaporating;
+    bool spray;
     const double A_ref = 1.0/3.0; // 1/3 rule
 
     // ICs

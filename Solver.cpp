@@ -86,11 +86,11 @@ void Solver::ReadParams(int argc, char* argv[]){
       // Spray
       {
         const auto Spray_ = toml::find(Physics_, "Spray");
-        spray_gas_slip = toml::find(Spray_,"spray_gas_slip").as_boolean();
-        evaporating = toml::find(Spray_,"evaporating").as_boolean(); // TODO change to simply "spray" true/false. There is no use case for spray with no evap.
-        if (evaporating) {
+        spray = toml::find(Spray_, "spray").as_boolean(); // TODO change to simply "spray" true/false. There is no use case for spray with no evap.
+        if (spray) {
           X_liq = toml::find(Spray_, "species").as_string();
           liq_type = toml::find(Spray_, "properties").as_string();
+          spray_gas_slip = toml::find(Spray_,"spray_gas_slip").as_boolean();
         }
       }
 
@@ -156,9 +156,15 @@ void Solver::ReadParams(int argc, char* argv[]){
           cvode_maxsteps = toml::find(Numerics_, "cvode_maxsteps").as_integer();
         }
         n_omp_threads = toml::find(Numerics_, "openMP_threads").as_integer();
-        av_Zl = toml::find(Numerics_, "av_Zl").as_floating();
-        av_md = toml::find(Numerics_, "av_md").as_floating();
-        av_Td = toml::find(Numerics_, "av_Td").as_floating();
+        if (spray){
+          av_Zl = toml::find(Numerics_, "av_Zl").as_floating();
+          av_md = toml::find(Numerics_, "av_md").as_floating();
+          av_Td = toml::find(Numerics_, "av_Td").as_floating();
+        } else {
+          av_Zl = 1.0e-5;
+          av_md = 1.0e-5;
+          av_Td = 1.0e-5;
+        }
     }
 
     // BCs
@@ -179,14 +185,21 @@ void Solver::ReadParams(int argc, char* argv[]){
             }
             // Spray
             const auto Spray_ = toml::find(Inlet_, "Spray");
-            Z_l_in = toml::find(Spray_, "Z_l").as_floating();
-            //m_d_in = toml::find(Spray_, "m_d").as_floating();
-            T_d_in = toml::find(Spray_, "T_d").as_floating();
-            m_d_in = toml::find_or<double>(Spray_,"m_d",-1.0);
-            D_d_in = toml::find_or<double>(Spray_,"D_d",-1.0);
-            if (D_d_in > 0.0 && m_d_in > 0.0){
-              std::cerr << "Inlet BC: Can only provide one of D_d or m_d" << std::endl;
-              throw(0);
+            if (spray) {
+              Z_l_in = toml::find(Spray_, "Z_l").as_floating();
+              //m_d_in = toml::find(Spray_, "m_d").as_floating();
+              T_d_in = toml::find(Spray_, "T_d").as_floating();
+              m_d_in = toml::find_or<double>(Spray_, "m_d", -1.0);
+              D_d_in = toml::find_or<double>(Spray_, "D_d", -1.0);
+              if (D_d_in > 0.0 && m_d_in > 0.0) {
+                std::cerr << "Inlet BC: Can only provide one of D_d or m_d" << std::endl;
+                throw (0);
+              }
+            } else {
+              Z_l_in = 0.0;
+              T_d_in = 300.0;
+              m_d_in = 1.0e-300;
+              D_d_in = 1.0e-300;
             }
         }
 
@@ -213,7 +226,12 @@ void Solver::ReadParams(int argc, char* argv[]){
             // Spray
             {
               const auto Spray_ = toml::find(Wall_Interior_, "Spray");
-              filming = toml::find(Spray_, "filming").as_boolean();
+              if (spray) {
+                filming = toml::find(Spray_, "filming").as_boolean();
+              } else {
+                filming = false;
+              }
+
             }
             // Solid
             {
@@ -275,9 +293,16 @@ void Solver::ReadParams(int argc, char* argv[]){
           X_0 = toml::find(Gas_, "X").as_string();
           // Spray
           const auto Spray_ = toml::find(ICs_, "Spray");
-          Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
-          m_d_0 = toml::find(Spray_, "m_d").as_floating();
-          T_d_0 = toml::find(Spray_, "T_d").as_floating();
+          if (spray){
+            Z_l_0 = toml::find(Spray_, "Z_l").as_floating();
+            m_d_0 = toml::find(Spray_, "m_d").as_floating();
+            T_d_0 = toml::find(Spray_, "T_d").as_floating();
+          } else {
+            Z_l_0 = 0.0;
+            m_d_0 = 1.0e-300;
+            T_d_0 = 300.0;
+          }
+
         // With restart file
         } else {
           restart_file = tmp;
@@ -424,14 +449,16 @@ void Solver::SetupGas() {
 }
 
 void::Solver::SetupLiquid(){
-  std::cout << "Solver::SetupLiquid()" << std::endl;
-  if (liq_type == "CoolProp") {
-    liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq));
-  } else if (liq_type == "fit") {
-    liq = std::unique_ptr<Liquid>(new FitLiquid(X_liq));
-  } else {
-    std::cerr << "Unknown liquid type '" << liq_type << "'" << std::endl;
-    throw(0);
+  if (spray) {
+    std::cout << "Solver::SetupLiquid()" << std::endl;
+    if (liq_type == "CoolProp") {
+      liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq));
+    } else if (liq_type == "fit") {
+      liq = std::unique_ptr<Liquid>(new FitLiquid(X_liq));
+    } else {
+      std::cerr << "Unknown liquid type '" << liq_type << "'" << std::endl;
+      throw (0);
+    }
   }
 }
 
@@ -497,7 +524,7 @@ void Solver::SetBCs() {
 
       // Z_l
       case idx_Z_l:
-        if (evaporating)
+        if (spray)
           inlet_BC(k) = Z_l_in;
         else
           inlet_BC(k) = 0.0;
@@ -505,7 +532,7 @@ void Solver::SetBCs() {
 
       // m_d
       case idx_m_d:
-        if (evaporating)
+        if (spray)
           inlet_BC(k) = m_d_in;
         else
           inlet_BC(k) = 1.0e-300;
@@ -513,7 +540,7 @@ void Solver::SetBCs() {
 
       // T_d
       case idx_T_d:
-        if (evaporating)
+        if (spray)
           inlet_BC(k) = T_d_in;
         else
           inlet_BC(k) = 300.0;
@@ -597,7 +624,7 @@ void Solver::DerivedParams() {
     // Spray parameters
     // TODO change for multicomponent spray
     // TODO assuming saturated liquid for now
-    if (evaporating) {
+    if (spray) {
         T_l = liq->T_sat(p_sys);
         L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
@@ -1243,15 +1270,17 @@ void Solver::Output() {
     for (int i = 0; i < N+2; i++){
       u_(i) = Getu(Phi,i);
       ZBilger_(i) = GetZBilger(Phi,i);
-      D_d_(i) = GetDd(Phi(i,idx_m_d), Phi(i,idx_T_d));
+      if (spray) D_d_(i) = GetDd(Phi(i, idx_m_d), Phi(i, idx_T_d));
     }
 
     // Console output of data
     int width_ = 14;
     std::cout << std::left << std::setw(width_) << "i" << std::setw(width_) << "x [m]" << std::setw(width_) << "u [m/s]"
       << std::setw(width_) << "rho [kg/m^3]" << std::setw(width_) << "V [1/s]"
-      << std::setw(width_) << "T [K]" << std::setw(width_) << "ZBilger" << std::setw(width_) << "Z_l" << std::setw(width_)
-      << "D_d [m]" << std::setw(width_) << "T_d [K]" << std::setw(width_);
+      << std::setw(width_) << "T [K]" << std::setw(width_) << "ZBilger" << std::setw(width_);
+    if (spray) {
+      std::cout << "Z_l" << std::setw(width_) << "D_d [m]" << std::setw(width_) << "T_d [K]" << std::setw(width_);
+    }
     for (const auto& s : output_species){
       std::cout << std::left << std::setw(width_) << "Y_" + s;
     }
@@ -1264,9 +1293,12 @@ void Solver::Output() {
       std::cout << std::left << std::setw(width_) << Phi(i,idx_V); // V
       std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,idx_T); // T
       std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << ZBilger_(i); // ZBilger
-      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,idx_Z_l); // Z_l
-      std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << D_d_(i); // D_d
-      std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i,idx_T_d); // T_d
+      if (spray) {
+        std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2)
+                  << Phi(i, idx_Z_l); // Z_l
+        std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << D_d_(i); // D_d
+        std::cout << std::left << std::setw(width_) << std::fixed << std::setprecision(1) << Phi(i, idx_T_d); // T_d
+      }
       for (const auto& s : output_species){
         std::cout << std::left << std::setw(width_) << std::scientific << std::setprecision(2) << Phi(i,m + GetSpeciesIndex(s)); // Y
       }
@@ -1299,7 +1331,7 @@ void Solver::Output() {
     if (output_file.is_open()){
         std::cout << "Writing " << output_name_ << std::endl;
         output_file << output_header << std::endl;
-        MatrixXd outmat_(N+2, M + 4); // X u_ ZBilger_ rho_ phi
+        MatrixXd outmat_(N+2, M + 4); // X u_ ZBilger_ rho_ Phi
         outmat_ << nodes, u_, ZBilger_, rho_, Phi;
         output_file << outmat_ << std::endl;
         output_file << "DATASETAUXDATA a = \"" << a << "\"" << std::endl;
@@ -1446,16 +1478,18 @@ void Solver::SetDerivedVars(){
 }
 
 void Solver::Clipping(){
-  // Enforce T_d < NEAR_ONE * T_l
-  if (phi.col(idx_T_d).maxCoeff() > NEAR_ONE * T_l) {
-    std::cout << "  Clipping T_d at t = " << time << "s" << std::endl;
+  if (spray) {
+    // Enforce T_d < NEAR_ONE * T_l
+    if (phi.col(idx_T_d).maxCoeff() > NEAR_ONE * T_l) {
+      std::cout << "  Clipping T_d at t = " << time << "s" << std::endl;
 
-    phi.col(idx_T_d) = phi.col(idx_T_d).cwiseMin(NEAR_ONE * T_l);
+      phi.col(idx_T_d) = phi.col(idx_T_d).cwiseMin(NEAR_ONE * T_l);
 
-    // Re-initialize CVode, since solution has changed
-    if (time_scheme == "CVODE") {
-      Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M) = phi;
-      CheckCVODE("CVodeReInit", CVodeReInit(cvode_mem, time, cvode_y));
+      // Re-initialize CVode, since solution has changed
+      if (time_scheme == "CVODE") {
+        Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M) = phi;
+        CheckCVODE("CVodeReInit", CVodeReInit(cvode_mem, time, cvode_y));
+      }
     }
   }
 }

@@ -236,16 +236,20 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
   double m_d_ = phi_(idx_m_d);
   double T_d_ = phi_(idx_T_d);
   double Y_g_ = std::min(NEAR_ONE, phi_(fuel_idx + m));
-  double D_d_ = GetDd(m_d_, T_d_);
-  double M_m = gas->meanMolecularWeight();
-  double M_f = gas->molecularWeight(fuel_idx);
-  double theta_2 = M_m/M_f;
-  double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_)/p_sys);
-  double Y_seq = chi_seq/(chi_seq + (1.0 - chi_seq)*theta_2);
-  // reference mass fraction (1/3 rule)
-  double Yref_ = (1.0-A_ref) * Y_seq + A_ref * Y_g_;
-  // reference properties
-  double lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+  double D_d_;
+  double lambda_;
+  if (spray) {
+    D_d_ = GetDd(m_d_, T_d_);
+    double M_m = gas->meanMolecularWeight();
+    double M_f = gas->molecularWeight(fuel_idx);
+    double theta_2 = M_m / M_f;
+    double chi_seq = std::min(NEAR_ONE, liq->p_sat(T_d_) / p_sys);
+    double Y_seq = chi_seq / (chi_seq + (1.0 - chi_seq) * theta_2);
+    // reference mass fraction (1/3 rule)
+    double Yref_ = (1.0 - A_ref) * Y_seq + A_ref * Y_g_;
+    // reference properties
+    lambda_ = Yref_ * liq->lambda_satvap(T_d_) + (1.0 - Yref_) * trans->thermalConductivity();
+  }
 
   switch (k){
     // V: rho_inf * a^2 - rho * V^2
@@ -256,9 +260,11 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
     // T:
     case idx_T:
       // spray: - (rho*Z_l/m_d) * m_d * c_l * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
-      if (evaporating && D_d_ > D_min && T_d_ < T_l) {
-        omegadot_ += -rho_ * Z_l_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_) /
-                    (liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
+      if (spray) {
+        if (D_d_ > D_min && T_d_ < T_l) {
+          omegadot_ += -rho_ * Z_l_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_) /
+                       (liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
+        }
       }
       // rxn: - SUM_(i = 0)^(nSpecies) h_i^molar * omegadot_i^molar,
       if (reacting) {
@@ -278,9 +284,11 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
 
     // T_d: + rho * f2 * (Nu/(3Pr)) * (theta_1/tau_d) * (T - T_d) = rho * f2 * (6 Nu * lamba) / (c_l * rho_l * D_d^2) * (T - T_d)
     case idx_T_d:
-      if (evaporating && D_d_ > D_min && T_d_ < T_l){
-        omegadot_ += rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_)/
-                    (liq->cp_liq(T_d_, p_sys) * liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
+      if (spray) {
+        if (D_d_ > D_min && T_d_ < T_l) {
+          omegadot_ += rho_ * Getf2(phi_, mdot_liq_) * (6.0 * GetNu(phi_) * lambda_) /
+                       (liq->cp_liq(T_d_, p_sys) * liq->rho_liq(T_d_, p_sys) * pow(D_d_, 2)) * (T_ - T_d_);
+        }
       }
       break;
 
@@ -294,6 +302,8 @@ double Solver::Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot
 }
 
 double Solver::GetGammadot(const Ref<const RowVectorXd>& phi_, const int k){
+  if (!spray) return 0.0;
+
   int thread = omp_get_thread_num();
   ThermoPhase* gas = gas_vec[thread].get();
 
@@ -378,7 +388,7 @@ double Solver::Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot
   Transport* trans = trans_vec[thread].get();
 
   double mdot_;
-  if (evaporating){
+  if (spray){
     double T_ = phi_(idx_T);
     double Z_l_ = phi_(idx_Z_l);
     double m_d_ = phi_(idx_m_d);
