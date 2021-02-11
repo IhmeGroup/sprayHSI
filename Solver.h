@@ -49,6 +49,7 @@ private:
     void Clipping();
     void StepIntegrator();
     void StepSolid();
+    void SetSprayRHS();
     double Getu(const Ref<const MatrixXd>& Phi_, int i);
     double GetZBilger(const Ref<const MatrixXd>& Phi_, int i);
     double Quadrature(const Ref<const VectorXd>& rhoV_, const Ref<const VectorXd>& dx_);
@@ -58,8 +59,8 @@ private:
     double Getc(const int k);
     double Getmu(const int k);
     double Getmu_av(const int k);
-    double Getomegadot(const Ref<const RowVectorXd>& phi_, const double mdot_liq_, const int k);
-    double GetGammadot(const Ref<const RowVectorXd>& phi_, const int k);
+    double Getomegadot(const Ref<const RowVectorXd>& phi_, const int k, const int idx);
+    double GetGammadot(const Ref<const RowVectorXd>& phi_, const int k, const int idx);
     double Getmdot_liq(const Ref<const RowVectorXd>& phi_, const double mdot_liq_);
     double GetDd(const double m_d_, const double T_d_);
     double GetNu(const Ref<const RowVectorXd>& phi_);
@@ -136,6 +137,8 @@ private:
     MatrixXd mu_av;
     MatrixXd omegadot;
     VectorXd mdot_liq;
+    VectorXd Tdot_liq_1;
+    VectorXd Tdot_liq_2;
     MatrixXd Gammadot;
     MatrixXd conv;
     MatrixXd diff;

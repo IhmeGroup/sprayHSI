@@ -667,6 +667,8 @@ void Solver::DerivedParams() {
     mu_av = MatrixXd::Zero(N,M);
     omegadot = MatrixXd::Zero(N,M);
     mdot_liq = VectorXd::Zero(N);
+    Tdot_liq_1 = VectorXd::Zero(N);
+    Tdot_liq_2 = VectorXd::Zero(N);
     Gammadot = MatrixXd::Zero(N,M);
     T_s = VectorXd::Zero(N_s);
 }
@@ -1514,8 +1516,15 @@ int Solver::RunSolver() {
                 }
             }
 
-            // Integrate gas/spray-phase system
+            // Start timer
             std::chrono::time_point<std::chrono::system_clock> tic = std::chrono::system_clock::now();
+
+            // Evaluate rhs for m_d, T_d
+            if (spray){
+              SetSprayRHS();
+            }
+
+            // Integrate gas/spray-phase system
             StepIntegrator();
 
             // Compute the gas-side wall heat flux
