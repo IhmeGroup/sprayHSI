@@ -164,10 +164,13 @@ void Solver::ReadParams(int argc, char* argv[]){
           av_Zl = toml::find(Numerics_, "av_Zl").as_floating();
           av_md = toml::find(Numerics_, "av_md").as_floating();
           av_Td = toml::find(Numerics_, "av_Td").as_floating();
+          // numerical experiments with dodecane sprays indicate 200 is a reasonable choice
+          SF_spray = toml::find_or<double>(Numerics_, "SF_spray", 200.0);
         } else {
           av_Zl = 1.0e-5;
           av_md = 1.0e-5;
           av_Td = 1.0e-5;
+          SF_spray = 0.0;
         }
     }
 
@@ -627,12 +630,12 @@ void Solver::DerivedParams() {
 
     // Spray parameters
     // TODO change for multicomponent spray
-    // TODO assuming saturated liquid for now
     if (spray) {
         T_l = liq->T_sat(p_sys);
         L_v = liq->L_v(T_l);
         fuel_idx = GetSpeciesIndex(X_liq);
-        D_min = 30.0 * dt; // TODO figure out why this factor works
+        double mu_ = trans_vec[thread]->viscosity(); // using inlet state from above
+        D_min = pow((SF_spray * dt * 18.0 * mu_ / liq->rho_liq(T_d_in, p_sys)), 0.5);
         if (m_d_in > 0.0) D_d_in = GetDd(m_d_in, T_d_in);
         else m_d_in = (M_PI/6.0) * liq->rho_liq(T_d_in, p_sys) * pow(D_d_in, 3.0);
         // Don't allow error due to D_min to exceed 10% of initial volume
@@ -644,7 +647,7 @@ void Solver::DerivedParams() {
           std::cout << "> (D_min/D_inlet)^3 = " << pow(D_min/D_d_in,3.0) << std::endl;
         }
     } else {
-        T_l = L_v = 0.0;
+        T_l = L_v = D_min = 0.0;
         fuel_idx = -1;
     }
 

@@ -157,6 +157,8 @@ private:
       N_Vector cvode_y;
       RHSFunctor* p_rhs_functor;
 
+      double SF_spray; // numerical safety factor for spray evaporation, SF_spray = (tau_d @ D=D_min) / dt
+
     // Mesh
         // Space
 
