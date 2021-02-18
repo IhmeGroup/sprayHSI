@@ -182,19 +182,18 @@ void Solver::ReadParams(int argc, char* argv[]){
             const auto Inlet_ = toml::find(BCs_, "Inlet");
             // Gas
             const auto Gas_ = toml::find(Inlet_, "Gas");
-            inlet_type = toml::find(Gas_, "type").as_string();
-            if (inlet_type == "mdot") {
-                T_in = toml::find(Gas_, "T").as_floating();
-                X_in = toml::find(Gas_, "X").as_string();
-                mdot = toml::find(Gas_, "mdot").as_floating();
-            } else {
-                std::cerr << "Unknown Inlet BC type " << inlet_type << "not supported" << std::endl;
+            mdot = toml::find_or<double>(Gas_, "mdot", -1.0);
+            u_inf = toml::find_or<double>(Gas_, "u", -1.0);
+            if (mdot > 0.0 && u_inf > 0.0) {
+              std::cerr << "Inlet BC: Can only provide one of mdot or u" << std::endl;
+              throw (0);
             }
+            T_in = toml::find(Gas_, "T").as_floating();
+            X_in = toml::find(Gas_, "X").as_string();
             // Spray
             const auto Spray_ = toml::find(Inlet_, "Spray");
             if (spray) {
               Z_l_in = toml::find(Spray_, "Z_l").as_floating();
-              //m_d_in = toml::find(Spray_, "m_d").as_floating();
               T_d_in = toml::find(Spray_, "T_d").as_floating();
               m_d_in = toml::find_or<double>(Spray_, "m_d", -1.0);
               D_d_in = toml::find_or<double>(Spray_, "D_d", -1.0);
@@ -344,6 +343,14 @@ void Solver::ReadParams(int argc, char* argv[]){
         mdot = atof(argv[i+1]);
         std::cout << "  mdot overriden via command line to " << mdot << std::endl;
       }
+      if (std::strcmp(argv[i],"-u_in") == 0){
+        u_inf = atof(argv[i+1]);
+        std::cout << "  u_in overriden via command line to " << u_inf << std::endl;
+        if (mdot > 0.0 && u_inf > 0.0) {
+          std::cerr << "Overriding inlet BC: Can only provide one of mdot or u_in" << std::endl;
+          throw (0);
+        }
+      }
       if (std::strcmp(argv[i],"-Z_l_in") == 0){
         Z_l_in = atof(argv[i+1]);
         std::cout << "  Z_l_in overriden via command line to " << Z_l_in << std::endl;
@@ -351,10 +358,38 @@ void Solver::ReadParams(int argc, char* argv[]){
       if (std::strcmp(argv[i],"-m_d_in") == 0){
         m_d_in = atof(argv[i+1]);
         std::cout << "  m_d_in overriden via command line to " << m_d_in << std::endl;
+        if (D_d_in > 0.0 && m_d_in > 0.0) {
+          std::cerr << "Overriding inlet BC: Can only provide one of D_d or m_d" << std::endl;
+          throw (0);
+        }
+      }
+      if (std::strcmp(argv[i],"-D_d_in") == 0){
+        D_d_in = atof(argv[i+1]);
+        std::cout << "  D_d_in overriden via command line to " << D_d_in << std::endl;
+        if (D_d_in > 0.0 && m_d_in > 0.0) {
+          std::cerr << "Overriding inlet BC: Can only provide one of D_d or m_d" << std::endl;
+          throw (0);
+        }
       }
       if (std::strcmp(argv[i],"-T_wall") == 0){
         T_wall = atof(argv[i+1]);
         std::cout << "  T_wall overriden via command line to " << T_wall << std::endl;
+        if (conjugate) {
+          std::cerr << "Cannot provide T_wall for conjugate simulation" << std::endl;
+          throw(0);
+        }
+        if (wall_type == "adiabatic") {
+          std::cerr << "Cannot provide T_wall for adiabatic wall simulation" << std::endl;
+          throw(0);
+        }
+      }
+      if (std::strcmp(argv[i],"-T_s_ext") == 0){
+        T_s_ext = atof(argv[i+1]);
+        std::cout << "  T_s_ext overriden via command line to " << T_s_ext << std::endl;
+        if (!conjugate) {
+          std::cerr << "Cannot provide T_s_ext for non-conjugate simulation" << std::endl;
+          throw(0);
+        }
       }
       if (std::strcmp(argv[i],"-p_sys") == 0){
         p_sys = atof(argv[i+1]);
@@ -627,6 +662,12 @@ void Solver::DerivedParams() {
       // Species molar enthalpies
       species_enthalpies_mol_vec.push_back(VectorXd::Zero(n_species));
     }
+
+    // Gas parameters
+    gas_vec[thread]->setState_TPX(T_in,p_sys,X_in);
+    rho_inf = gas_vec[thread]->density();
+    if (mdot > 0.0) u_inf = mdot/rho_inf;
+    else mdot = rho_inf * u_inf;
 
     // Spray parameters
     // TODO change for multicomponent spray

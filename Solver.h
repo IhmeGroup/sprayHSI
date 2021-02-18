@@ -239,6 +239,7 @@ private:
         double T_in;
         std::string X_in;
         double mdot;
+        double u_inf;
         double Z_l_in;
         double m_d_in;
         double D_d_in;
