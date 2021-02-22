@@ -1436,8 +1436,9 @@ void Solver::OutputIgnition() {
   double x_ign_ = nodes(max_row_+1);
   double dx_ign_avg_ = (dx(max_row_) + dx(max_row_+1))/2.0;
   if (ign_cond == "T_max") {
-    std::cout << "  max(T) = " << max_T_ << " > T_max = " << T_max << std::endl;
-    std::cout << "  Ignition at x = " << x_ign_ << " where dx_avg = " << dx_ign_avg_ << std::endl;
+    std::cout << "  max(T) = " << std::fixed << std::setprecision(1) << max_T_ << " > T_max = " << T_max << std::endl;
+    std::cout << "  Ignition at x = " << std::scientific << std::setprecision(2) << x_ign_
+              << " where dx_avg = " << std::scientific << std::setprecision(2) << dx_ign_avg_ << std::endl;
   }
   // Write to "ignition" file
   std::string ign_file_path_ = output_path + "ignition_data.csv";
