@@ -158,6 +158,7 @@ private:
       RHSFunctor* p_rhs_functor;
 
       double SF_spray; // numerical safety factor for spray evaporation, SF_spray = (tau_d @ D=D_min) / dt
+      double nonvap_frac; // nonvap_frac = (D_min / D_d_in)^3, the fraction of the inlet BC's droplet volume at which evaporation is cut off
 
     // Mesh
         // Space

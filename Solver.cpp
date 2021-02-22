@@ -166,11 +166,13 @@ void Solver::ReadParams(int argc, char* argv[]){
           av_Td = toml::find(Numerics_, "av_Td").as_floating();
           // numerical experiments with dodecane sprays indicate 200 is a reasonable choice
           SF_spray = toml::find_or<double>(Numerics_, "SF_spray", 200.0);
+          nonvap_frac = toml::find_or<double>(Numerics_, "nonvap_frac", 0.1);
         } else {
           av_Zl = 1.0e-5;
           av_md = 1.0e-5;
           av_Td = 1.0e-5;
           SF_spray = 0.0;
+          nonvap_frac = 0.1;
         }
     }
 
@@ -678,11 +680,11 @@ void Solver::DerivedParams() {
         double mu_ = trans_vec[thread]->viscosity(); // using inlet state from above
         if (m_d_in > 0.0) D_d_in = GetDd(m_d_in, T_d_in);
         else m_d_in = (M_PI/6.0) * liq->rho_liq(T_d_in, p_sys) * pow(D_d_in, 3.0);
-        // Don't allow error due to D_min to exceed 10% of initial volume, reduce outer dt if necessary
+        // Don't allow error due to D_min to exceed nonvap_frac of initial volume, reduce outer dt if necessary
         D_min = pow((SF_spray * dt * 18.0 * mu_ / liq->rho_liq(T_d_in, p_sys)), 0.5);
-        if (pow(D_min/D_d_in,3.0) > 0.1){
-          std::cout << "> (D_min/D_inlet)^3 = " << pow(D_min/D_d_in,3.0) << " > 0.1. Reducing dt to resolve 90% of evaporation." << std::endl;
-          D_min = D_d_in * pow(0.1, 1.0/3.0);
+        if (pow(D_min/D_d_in,3.0) > nonvap_frac){
+          std::cout << "> (D_min/D_inlet)^3 = " << pow(D_min/D_d_in,3.0) << " > nonvap_frac = " << nonvap_frac << ". Reducing dt to resolve evaporation to nonvap_frac." << std::endl;
+          D_min = D_d_in * pow(nonvap_frac, 1.0/3.0);
           dt = liq->rho_liq(T_d_in, p_sys) * pow(D_min, 2.0) / (18.0 * mu_) / SF_spray;
           std::cout << ">  dt = " << dt << std::endl;
         }
