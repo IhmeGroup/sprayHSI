@@ -8,7 +8,6 @@
 #include <algorithm>
 #include "Solver.h"
 #include "toml.hpp"
-#include "CoolProp.h"
 #include "boost/algorithm/string.hpp"
 #include "cvode/cvode.h"
 #include "cvode/cvode_dense.h"
@@ -16,7 +15,6 @@
 #include "RHSFunctor.h"
 #include "Meshing.h"
 #include "omp.h"
-#include "Liquid/CoolPropLiquid.h"
 #include "Liquid/FitLiquid.h"
 
 #define NEAR_ONE 0.9999999999
@@ -495,9 +493,7 @@ void Solver::SetupGas() {
 void::Solver::SetupLiquid(){
   if (spray) {
     std::cout << "Solver::SetupLiquid()" << std::endl;
-    if (liq_type == "CoolProp") {
-      liq = std::unique_ptr<Liquid>(new CoolPropLiquid(X_liq));
-    } else if (liq_type == "fit") {
+    if (liq_type == "fit") {
       liq = std::unique_ptr<Liquid>(new FitLiquid(X_liq));
     } else {
       std::cerr << "Unknown liquid type '" << liq_type << "'" << std::endl;
