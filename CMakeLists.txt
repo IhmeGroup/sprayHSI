@@ -14,11 +14,8 @@ set(BOOST_ROOT /usr/local/Cellar/boost@1.55/1.55.0_1)
 set(TOML_ROOT /Users/danmohad/Utilities/toml11)
 set(CLANG_LLVM_ROOT /usr/local/opt/llvm)
 
-set(COOLPROP_STATIC_LIBRARY true)
-add_definitions(-DNO_FMTLIB)
+include_directories(${CANTERA_ROOT}/include ${SUNDIALS_ROOT}/include ${EIGEN3_ROOT}/include/eigen3 ${BOOST_ROOT}/include ${TOML_ROOT})
+link_directories(${CANTERA_ROOT}/lib ${SUNDIALS_ROOT}/lib ${CLANG_LLVM_ROOT}/lib)
 
-include_directories(${CANTERA_ROOT}/include ${SUNDIALS_ROOT}/include ${EIGEN3_ROOT}/include/eigen3 ${BOOST_ROOT}/include ${TOML_ROOT} ${UTILITIES_ROOT}/CoolProp/include)
-link_directories(${CANTERA_ROOT}/lib ${SUNDIALS_ROOT}/lib ${UTILITIES_ROOT}/CoolProp/build ${CLANG_LLVM_ROOT}/lib)
-
-add_executable(Hiemenz_solver main.cpp Solver.cpp Solver.h RHSFunctor.cpp RHSFunctor.h Meshing.h Liquid/Liquid.h Liquid/CoolPropLiquid.cpp Liquid/CoolPropLiquid.h Liquid/FitLiquid.cpp Liquid/FitLiquid.h SolverPhysics.cpp)
-target_link_libraries(Hiemenz_solver cantera sundials_cvodes sundials_ida sundials_nvecserial CoolProp)
+add_executable(Hiemenz_solver main.cpp Solver.cpp Solver.h RHSFunctor.cpp RHSFunctor.h Meshing.h Liquid/Liquid.h Liquid/FitLiquid.cpp Liquid/FitLiquid.h SolverPhysics.cpp)
+target_link_libraries(Hiemenz_solver cantera sundials_cvodes sundials_ida sundials_nvecserial)
