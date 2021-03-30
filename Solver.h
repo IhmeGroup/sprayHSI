@@ -157,8 +157,12 @@ private:
       N_Vector cvode_y;
       RHSFunctor* p_rhs_functor;
 
-      double SF_spray; // numerical safety factor for spray evaporation, SF_spray = (tau_d @ D=D_min) / dt
-      double nonvap_frac; // nonvap_frac = (D_min / D_d_in)^3, the fraction of the inlet BC's droplet volume at which evaporation is cut off
+    double SF_spray; // numerical safety factor for spray evaporation, SF_spray = (tau_d @ D=D_min) / dt
+    double nonvap_frac; // nonvap_frac = (D_min / D_d_in)^3, the fraction of the inlet BC's droplet volume at which evaporation is cut off
+
+    bool clip_T;
+    double T_clip_min;
+    double T_clip_max;
 
     // Mesh
         // Space

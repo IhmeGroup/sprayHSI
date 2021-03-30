@@ -172,6 +172,15 @@ void Solver::ReadParams(int argc, char* argv[]){
           SF_spray = 0.0;
           nonvap_frac = 0.1;
         }
+        clip_T = toml::find_or<bool>(Numerics_, "clip_T", true);
+        if (clip_T){
+          T_clip_min = toml::find_or<double>(Numerics_, "T_clip_min", 250.0);
+          T_clip_max = toml::find_or<double>(Numerics_, "T_clip_max", 3000.0);
+        } else {
+          T_clip_min = 0.0;
+          T_clip_max = 10000.0;
+        }
+
     }
 
     // BCs
@@ -1532,6 +1541,21 @@ void Solver::SetDerivedVars(){
 }
 
 void Solver::Clipping(){
+  if (clip_T){
+    // Enforce T > T_clip_min and T < T_clip_max
+    if ((phi.col(idx_T).maxCoeff() > T_clip_max) || (phi.col(idx_T).minCoeff() < T_clip_min)) {
+      std::cout << "  Clipping T at t = " << time << "s" << std::endl;
+
+      phi.col(idx_T) = phi.col(idx_T).cwiseMin(T_clip_max);
+      phi.col(idx_T) = phi.col(idx_T).cwiseMax(T_clip_min);
+
+      // Re-initialize CVode, since solution has changed
+      if (time_scheme == "CVODE") {
+        Eigen::Map<Eigen::MatrixXd>(NV_DATA_S(cvode_y), N, M) = phi;
+        CheckCVODE("CVodeReInit", CVodeReInit(cvode_mem, time, cvode_y));
+      }
+    }
+  }
   if (spray) {
     // Enforce T_d < NEAR_ONE * T_l
     if (phi.col(idx_T_d).maxCoeff() > NEAR_ONE * T_l) {
