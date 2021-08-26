@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 project(Hiemenz_solver)
 
 set(CMAKE_CXX_STANDARD 11)
+# If using an Intel compiler, in the following line replace "-fopenmp" with "-qopenmp"
 list(APPEND CMAKE_CXX_FLAGS -fopenmp)
 # For OSX, uncomment the following line:
 # list(APPEND CMAKE_CXX_FLAGS "-arch x86_64 -framework Accelerate")
