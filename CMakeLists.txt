@@ -6,6 +6,8 @@ list(APPEND CMAKE_CXX_FLAGS -fopenmp)
 # For OSX, uncomment the following line:
 # list(APPEND CMAKE_CXX_FLAGS "-arch x86_64 -framework Accelerate")
 
+# Modify this path to point to the directory containing the dependencies.
+# If dependencies are not all in one place, modify the "xx_ROOT" locations to reflect locations.
 set(DEPS /path/to/dependencies)
 
 set(CANTERA_ROOT ${DEPS}/cantera)
@@ -13,7 +15,7 @@ set(SUNDIALS_ROOT ${DEPS}/sundials-2.7.0/build)
 set(EIGEN3_ROOT ${DEPS}/eigen/3.3.7)
 set(BOOST_ROOT ${DEPS}/boost-1.55)
 set(TOML_ROOT ${DEPS}/toml11)
-# For OSX using Clang/LLVM compiler, uncomment the following line
+# For OSX using Clang/LLVM compiler, uncomment the following line and specify the correct path.
 # set(CLANG_LLVM_ROOT /path/to/llvm)
 
 include_directories(${CANTERA_ROOT}/include ${SUNDIALS_ROOT}/include ${EIGEN3_ROOT}/include/eigen3 ${BOOST_ROOT}/include ${TOML_ROOT})
