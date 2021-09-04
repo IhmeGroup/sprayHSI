@@ -1,3 +1,7 @@
+// This file is part of the 1D-HSI solver hosted at github.com/IhmeGroup/sprayHSI
+// D. Mohaddes
+// September 2021
+
 //
 // Created by Danyal Mohaddes on 1/28/21.
 //

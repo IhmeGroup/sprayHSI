@@ -1,3 +1,7 @@
+# This file is part of the 1D-HSI solver hosted at github.com/IhmeGroup/sprayHSI
+# D. Mohaddes
+# September 2021
+
 cmake_minimum_required(VERSION 3.9)
 project(Hiemenz_solver)
 
